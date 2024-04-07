@@ -1,0 +1,100 @@
+<div class="text-center admin-login">
+    <div class="form-signin">
+        {% if admin_logged_in %}
+        <div>
+            <h1 class="h3 mb-3 fw-normal">Logged In</h1>
+            <button class="btn btn-danger">Logout</button>
+        </div>
+        {% else %}
+        <form>
+            <h1 class="h3 mb-3 fw-normal">Admin Login</h1>
+            <div class="form-floating">
+                <input type="input" class="form-control" id="username" placeholder="Username">
+                <label for="username">Username</label>
+            </div>
+            <div class="form-floating">
+                <input type="password" class="form-control" id="password" placeholder="Password">
+                <label for="password">Password</label>
+            </div>
+            <button class="w-100 btn btn-lg btn-primary" type="submit">Sign In</button>
+        </form>
+        <div id="alerts-placeholder"></div>
+        {% endif %}
+    </div>
+</body>
+
+<style>
+    .admin-login {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        padding-top: 40px;
+        padding-bottom: 40px;
+        align-self: center;
+        flex: auto;
+    }
+
+    .form-signin {
+        width: 100%;
+        max-width: 330px;
+        padding: 15px;
+        margin: auto;
+    }
+</style>
+
+<script>
+    $(document).ready(function() {
+        $('form button').click(function(e) {
+            e.preventDefault();
+            let username = $('#username').val();
+            let password = $('#password').val();
+            let data = {
+                username: username,
+                password: password
+            };
+            $.ajax({
+                url: '/admin/login',
+                type: 'POST',
+                data: JSON.stringify(data),
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                success: function(resposne) {
+                    $('form').html(
+                        `<div>
+                            <h1 class="h3 mb-3 fw-normal">Logged In</h1>
+                            <button class="btn btn-danger">Logout</button>
+                        </div>`
+                    );
+                    $('#alerts-placeholder').html(``)
+                    setLogoutEventListener();
+                },
+                error: function(error) {
+                    console.log(error);
+                    $('#alerts-placeholder').html(`
+                        <div class="alert alert-danger" role="alert">
+                            Invalid MQ ID or Password.
+                        </div>
+                    `);
+                }
+            })
+        });
+        setLogoutEventListener();
+    })
+
+    function setLogoutEventListener() {
+        $('.admin-login button.btn-danger').click(function(e) {
+            e.preventDefault();
+            $.ajax({
+                url: '/admin/logout',
+                type: 'GET',
+                success: function(response) {
+                    window.location.href = '/admin';
+                },
+                error: function(error) {
+                    console.log(error);
+                }
+            })
+        });
+    }
+</script>

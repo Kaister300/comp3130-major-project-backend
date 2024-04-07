@@ -1,0 +1,64 @@
+<div class="events-container">
+    <div class="b-example-divider"></div>
+
+    {% if not admin_logged_in %}
+    <div class="login-banner">
+        <h1 class="h3 mb-3 fw-normal">Please login to continue</h1>
+    </div>
+
+    {% else %}
+    <div class="d-flex flex-column align-items-stretch flex-shrink-0 bg-white" style="width: 380px;">
+        <h1>Events List</h1>
+        <div class="list-group list-group-flush bottom-border scrollarea">
+            {% for event in events %}
+            <div class="list-group-item list-group-item-action">
+                <div class="card">
+                    <img src="{{ event.bannerImage }}" class="card-img-top" alt="Banner">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ event.name }}</h5>
+                        <p class="card-text">{{ event.description }}</p>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">Dates</p>
+                        <p class="card-text">Start Time: {{ event.dateStart }}</p>
+                        <p class="card-text">End Time: {{ event.dateEnd }}</p>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">Location</p>
+                        <p class="card-text">Room: {{ event.location.room }}</p>
+                        <p class="card-text">Address: {{ event.location.address }}</p>
+                    </div>
+                    <div class="card-footer">
+                        <p class="card-text">Creator User Id: {{ event.creator }}</p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="b-example-divider"></div>
+    {% endif %}
+</div>
+
+<style>
+    .events-container {
+        display: flex;
+        flex: auto;
+    }
+
+    .login-banner {
+        flex: auto;
+        align-self: center;
+        text-align: center;
+    }
+
+    .card-header {
+        display: flex;
+        align-items: center;
+    }
+
+    .card-header h1 {
+        margin: 0 !important;
+        padding: 1rem;
+    }
+</style>

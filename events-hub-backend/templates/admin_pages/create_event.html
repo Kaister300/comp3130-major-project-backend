@@ -1,0 +1,128 @@
+<div class="create-container">
+    <div class="b-example-divider"></div>
+    {% if not admin_logged_in %}
+    <div class="login-banner">
+        <h1 class="h3 mb-3 fw-normal">Please login to continue</h1>
+    </div>
+    {% else %}
+    <div class="form-create-event">
+        <form>
+            <h1 class="h3 mb-3 fw-normal">Create Event</h1>
+            <img src="" id="preview-banner" alt="Preview">
+            <div class="form-floating">
+                <select class="form-select" id="user-select" aria-label="User select">
+                    <option value="" selected></option>
+                    {% for user in users %}
+                    <option value="{{ user.id }}">{{ user.firstName }} {{ user.lastName }} ({{ user.id }})</option>
+                    {% endfor %}
+                </select>
+                <label for="user-select">Select User</label>
+            </div>
+            <div class="form-floating">
+                <input type="input" class="form-control" id="name" placeholder="Event Name" required>
+                <label for="name">Event Name</label>
+            </div>
+            <div class="form-floating">
+                <textarea class="form-control" id="description" placeholder="Event Description" required></textarea>
+                <label for="description">Event Description</label>
+            </div>
+            <div class="form-floating">
+                <input type="datetime-local" class="form-control" id="date_start" placeholder="Start Time" required>
+                <label for="date_start">Start Time</label>
+            </div>
+            <div class="form-floating">
+                <input type="datetime-local" class="form-control" id="date_end" placeholder="End Time" required>
+                <label for="date_end">End Time</label>
+            </div>
+            <div class="form-floating">
+                <input type="input" class="form-control" id="room" placeholder="Room" required>
+                <label for="room">Room</label>
+            </div>
+            <div class="form-floating">
+                <input type="input" class="form-control" id="address" placeholder="Address" required>
+                <label for="address">Address</label>
+            </div>
+            <div class="input-group mb-3">
+                <input type="file" class="form-control" id="banner_photo" accept="image/png, image/jpeg" placeholder="Banner Photo" required>
+                <label class="input-group-text" for="banner_photo">Banner Photo</label>
+            </div>
+            <button class="w-100 btn btn-lg btn-primary" type="submit">Create Event</button>
+        </form>
+        <div id="alerts-placeholder"></div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .create-container {
+        display: flex;
+        flex: auto;
+    }
+
+    .login-banner {
+        flex: auto;
+        align-self: center;
+        text-align: center;
+    }
+
+    .form-create-event {
+        width: 100%;
+        max-width: 800px;
+        padding: 15px;
+        margin: auto;
+    }
+
+    #preview-banner {
+        max-width: 800px;
+        max-height: 200px;
+    }
+</style>
+
+<script>
+    $(document).ready(function() {
+        $('form button').click(function(e) {
+            e.preventDefault();
+            let data = {
+                user_id: $('#user-select').val(),
+                name: $('#name').val(),
+                description: $('#description').val(),
+                dateStart: $('#date_start').val(),
+                dateEnd: $('#date_end').val(),
+                location: {
+                    room: $('#room').val(),
+                    address: $('#address').val()
+                },
+                bannerImage: $('#preview-banner').attr('src'),
+                creator: $('#user-select').val()
+            }
+            console.log(data);
+            $.ajax({
+                url: '/admin/create_event',
+                type: 'POST',
+                data: JSON.stringify(data),
+                contentType: 'application/json',
+                success: function(response) {
+                    $('#alerts-placeholder').html(`<div class="alert alert-success" role="alert">Event created successfully</div>`);
+                },
+                error: function(response) {
+                    console.log(response);
+                    $('#alerts-placeholder').html(`<div class="alert alert-danger" role="alert">${response.responseText}</div>`);
+                }
+            });
+        });
+
+        $('#banner_photo').change(function(e) {
+            let file = e.target.files[0];
+            let filesize = ((file.size/1024)/1024).toFixed(10);
+            if (filesize < 10) {
+                let reader = new FileReader();
+                reader.onload = function(e) {
+                    $('#preview-banner').attr('src', e.target.result);
+                }
+                reader.readAsDataURL(file);
+            } else {
+                $('#alerts-placeholder').html('<div class="alert alert-danger" role="alert">File size too large. Please upload a file less than 10MB</div>');
+            }
+        });
+    });
+</script>

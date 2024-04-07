@@ -1,3 +1,4 @@
+import datetime
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
@@ -11,9 +12,11 @@ class User(db.Model):
     id = db.Column(db.String(15), primary_key=True, nullable=False)
     firstName = db.Column(db.String(50), nullable=False)
     lastName = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.String(150), nullable=False)
     profilePicture = db.Column(db.LargeBinary, nullable=False)
-    joinedEvents = db.Column(db.JSON, nullable=False)
+    joinedEvents = db.Column(db.JSON)
     passwordHash = db.Column(db.String(128), nullable=False)
+    created = db.Column(db.DateTime, default=datetime.datetime.now, nullable=False)
 
     def to_dict(self) -> dict:
         """
@@ -24,8 +27,10 @@ class User(db.Model):
             "id": self.id,
             "firstName": self.firstName,
             "lastName": self.lastName,
-            "profilePicture": self.profilePicture,
+            "description": self.description,
+            "profilePicture": self.profilePicture.decode(),
             "joinedEvents": self.joinedEvents,
+            "created": self.created,
         }
 
 
@@ -51,6 +56,6 @@ class Event(db.Model):
             "dateStart": self.dateStart,
             "dateEnd": self.dateEnd,
             "location": self.location,
-            "bannerImage": self.bannerImage,
+            "bannerImage": self.bannerImage.decode(),
             "creator": self.creator,
         }

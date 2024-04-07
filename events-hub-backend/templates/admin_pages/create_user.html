@@ -1,0 +1,126 @@
+<div class="create-container">
+    <div class="b-example-divider"></div>
+    {% if not admin_logged_in %}
+    <div class="login-banner">
+        <h1 class="h3 mb-3 fw-normal">Please login to continue</h1>
+    </div>
+    {% else %}
+    <div class="form-create-user">
+        <form>
+            <div id="form-create-user-header">
+                <img src="" id="preview-picture" alt="Profile">
+                <h1 class="h3 mb-3 fw-normal">Create User</h1>
+            </div>
+            <!-- Create form floating divs that contain input data for an id, first name, last name and profile picture for a user-->
+            <div class="form-floating">
+                <input type="input" class="form-control" id="id" placeholder="ID" required>
+                <label for="id">ID</label>
+            </div>
+            <div class="form-floating">
+                <input type="password" class="form-control" id="password" placeholder="Password">
+                <label for="password">Password</label>
+            </div>
+            <div class="form-floating">
+                <input type="input" class="form-control" id="first_name" placeholder="First Name" required>
+                <label for="first_name">First Name</label>
+            </div>
+            <div class="form-floating">
+                <input type="input" class="form-control" id="last_name" placeholder="Last Name" required>
+                <label for="last_name">Last Name</label>
+            </div>
+            <div class="input-group mb-3">
+                <span class="input-group-text" for="description">Description</span>
+                <textarea type="input" class="form-control" aria-label="Description" id="description" placeholder="Description" required></textarea>
+            </div>
+            <div class="input-group mb-3">
+                <input type="file" class="form-control" id="profile_picture"  accept="image/png, image/jpeg" placeholder="Profile Picture" required>
+                <label class="input-group-text" for="profile_picture">Profile Picture</label>
+            </div>
+            <button class="w-100 btn btn-lg btn-primary" type="submit">Create User</button>
+        </form>
+        <div id="alerts-placeholder"></div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .create-container {
+        display: flex;
+        flex: auto;
+    }
+
+    .login-banner {
+        flex: auto;
+        align-self: center;
+        text-align: center;
+    }
+
+    .form-create-user {
+        width: 100%;
+        max-width: 800px;
+        padding: 15px;
+        margin: auto;
+    }
+
+    #form-create-user-header {
+        display: flex;
+        align-items: center;
+    }
+
+    #preview-picture {
+        width: 70px;
+        height: 70px;
+        border: 1px solid red;
+        border-radius: 100%;
+    }
+
+    #form-create-user-header h1 {
+        margin: 0px !important;
+        padding: 1rem;
+    }
+</style>
+
+<script>
+    $(document).ready(async function() {
+        $('form button.btn-primary').click(function(e) {
+            e.preventDefault();
+            let data = {
+                id: $('#id').val(),
+                firstName: $('#first_name').val(),
+                lastName: $('#last_name').val(),
+                description: $('#description').val(),
+                password: $('#password').val(),
+                pictureData: $('#preview-picture').attr('src')
+            };
+            $.ajax({
+                url: '/admin/create_user',
+                type: 'POST',
+                data: JSON.stringify(data),
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                success: function(response) {
+                    $('#alerts-placeholder').html('<div class="alert alert-success" role="alert">User created successfully</div>');
+                },
+                error: function(response) {
+                    console.log(response);
+                    $('#alerts-placeholder').html(`<div class="alert alert-danger" role="alert">${response}</div>`);
+                }
+            });
+        });
+
+        $('#profile_picture').change(function(e) {
+            let file = e.target.files[0];
+            let filesize = ((file.size/1024)/1024).toFixed(10);
+            if (filesize < 10) {
+                let reader = new FileReader();
+                reader.onload = function(e) {
+                    $('#preview-picture').attr('src', e.target.result);
+                }
+                reader.readAsDataURL(file);
+            } else {
+                $('#alerts-placeholder').html('<div class="alert alert-danger" role="alert">File size too large. Please upload a file less than 10MB</div>');
+            }
+        });
+    })
+</script>

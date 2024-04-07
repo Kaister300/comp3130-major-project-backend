@@ -1,0 +1,62 @@
+<div class="users-container">
+    <div class="b-example-divider"></div>
+
+    {% if not admin_logged_in %}
+    <div class="login-banner">
+        <h1 class="h3 mb-3 fw-normal">Please login to continue</h1>
+    </div>
+
+    {% else %}
+    <div class="d-flex flex-column align-items-stretch flex-shrink-0 bg-white" style="width: 380px;">
+        <h1>Users List</h1>
+        <div class="list-group list-group-flush border-bottom scrollarea">
+            {% for user in users %}
+            <div class="list-group-item list-group-item-action">
+                <div class="card">
+                    <div class="card-header">
+                        <img src="{{ user.profilePicture }}" alt="Profile">
+                        <h1 class="h3 mb-3 fw-normal">{{ user.id }}</h1>
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title">{{ user.firstName }} {{ user.lastName }}</h5>
+                        <p class="card-text">{{ user.description }}</p>
+                        <p class="card-text">{{ user.created }}</p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .users-container {
+        display: flex;
+        flex: auto;
+    }
+
+    .login-banner {
+        flex: auto;
+        align-self: center;
+        text-align: center;
+    }
+
+    .card-header {
+        display: flex;
+        align-items: center;
+    }
+
+    .card-header img {
+        width: 50px;
+        height: 50px;
+        margin: 10px;
+        border: 1px solid red;
+        border-radius: 100%;
+    }
+
+    .card-header h1 {
+        margin: 0 !important;
+        padding: 1rem;
+    }
+</style>
