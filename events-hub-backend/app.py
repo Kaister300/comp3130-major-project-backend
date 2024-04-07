@@ -484,5 +484,27 @@ def user_login():
     return {"token": "token"}, 200
 
 
+@app.route("/api/users", methods=["GET"])
+@app.route("/api/users/<user_id>", methods=["GET"])
+def get_users_api(user_id=None):
+    if user_id is None:
+        users = [user.to_dict() for user in User.query.all()]
+        return jsonify(users)
+
+    user = db.get_or_404(User, user_id)
+    return jsonify(user.to_dict())
+
+
+@app.route("/api/events", methods=["GET"])
+@app.route("/api/events/<event_id>", methods=["GET"])
+def get_events_api(event_id=None):
+    if event_id is None:
+        events = [event.to_dict() for event in Event.query.all()]
+        return jsonify(events)
+
+    event = db.get_or_404(Event, event_id)
+    return jsonify(event.to_dict())
+
+
 if __name__ == "__main__":
     app.run(HOSTNAME, PORT, debug=True)
