@@ -21,6 +21,20 @@ class User(db.Model):
     def to_dict(self) -> dict:
         """
         Returns a dictionary representation of the User object.
+        Does not return the password hash or joinedEvents.
+        """
+        return {
+            "id": self.id,
+            "firstName": self.firstName,
+            "lastName": self.lastName,
+            "description": self.description,
+            "profilePicture": self.profilePicture.decode(),
+            "created": self.created,
+        }
+
+    def to_dict_authorised(self) -> dict:
+        """
+        Returns a dictionary representation of the User object.
         Does not return the password hash.
         """
         return {
@@ -29,8 +43,8 @@ class User(db.Model):
             "lastName": self.lastName,
             "description": self.description,
             "profilePicture": self.profilePicture.decode(),
-            "joinedEvents": self.joinedEvents,
             "created": self.created,
+            "joinedEvents": self.joinedEvents,
         }
 
 
@@ -45,6 +59,7 @@ class Event(db.Model):
     dateEnd = db.Column(db.DateTime, nullable=False)
     location = db.Column(db.JSON, nullable=False)
     bannerImage = db.Column(db.LargeBinary, nullable=False)
+    attendees = db.Column(db.JSON, nullable=False)
     creator = db.Column(db.String(15), db.ForeignKey("user.id"), nullable=False)
 
     def to_dict(self) -> dict:
@@ -53,8 +68,8 @@ class Event(db.Model):
             "id": self.id,
             "name": self.name,
             "description": self.description,
-            "dateStart": self.dateStart,
-            "dateEnd": self.dateEnd,
+            "dateStart": self.dateStart.strftime("%Y-%m-%d %H:%M:%S"),
+            "dateEnd": self.dateEnd.strftime("%Y-%m-%d %H:%M:%S"),
             "location": self.location,
             "bannerImage": self.bannerImage.decode(),
             "creator": self.creator,

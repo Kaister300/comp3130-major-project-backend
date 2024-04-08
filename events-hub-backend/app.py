@@ -7,6 +7,7 @@ import datetime
 from threading import Thread
 import requests
 
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, Response, session, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from markupsafe import escape, escape_silent, Markup
@@ -17,6 +18,8 @@ from Models import User, Event, db
 
 logger = logging.getLogger("events-hub-backend")
 logging.basicConfig(level=logging.INFO)
+
+load_dotenv()
 
 HOSTNAME = os.getenv("HOSTNAME", "localhost")
 PORT = int(os.getenv("PORT", "3000"))
@@ -66,40 +69,22 @@ def scan_image(base64_uri: str) -> bool:
     Scans the image for any malicious content.
     Uses sightengine API for scanning.
     """
-    base64_uri = base64_uri.split(",")[1]
-    sightengine_url = "https://api.sightengine.com/1.0/check.json"
+    sightengine_url = "https://api.sightengine.com/1.0/check-workflow.json"
     params = {
-        "models": "nudity-2.0,wad,offensive,text-content,gore,text,qr-content",
+        "workflow": os.getenv("SIGHTENGINE_PHOTO_WORKFLOW"),
         "api_user": os.getenv("SIGHTENGINE_USER"),
         "api_secret": os.getenv("SIGHTENGINE_SECRET"),
     }
-    files = {"media": base64.b64decode(base64_uri)}
+    files = {"media": base64.b64decode(base64_uri.split(",")[1])}
     r = requests.post(sightengine_url, params=params, files=files, timeout=10)
     return process_image_scan(r.json())
 
 
 def process_image_scan(results: dict) -> bool:
     """Sets the conditions for a safe image from sightengine API results."""
-    logging.info("Image scan results: %s", results)
     if results["status"] != "success":
         return False
-    if results["nudity"]["none"] < 0.95:
-        return False
-    if results["weapon"] > 0.5:
-        return False
-    if results["alcohol"] > 0.5:
-        return False
-    if results["drugs"] > 0.5:
-        return False
-    if results["offensive"]["prob"] > 0.1:
-        return False
-    if results["gore"]["prob"] > 0.1:
-        return False
-    if results["text"]["profanity"]:
-        return False
-    if results["qr"]["profanity"]:
-        return False
-    if results["qr"]["blacklist"]:
+    if results["summary"]["action"] == "reject":
         return False
     return True
 
@@ -200,6 +185,9 @@ def admin_users(user_id=None):
         users = [user.to_dict() for user in User.query.all()]
         return render_template("admin_pages/users.html", users=users)
 
+    if "admin_token" not in session:
+        return "Unauthorized", 401
+
     user = db.get_or_404(User, user_id)
     return jsonify(user.to_dict())
 
@@ -260,21 +248,21 @@ def user_validation(data: dict) -> tuple[dict, int]:
     try:
         int(data["id"])
     except ValueError:
-        return {"error": "User ID must be a number"}, 400
+        return "User ID must be a number", 400
     if len(data["id"]) <= 6 or len(data["id"]) >= 16:
-        return {"error": "User ID must be between 7 and 15 digits long"}, 400
+        return "User ID must be between 7 and 15 digits long", 400
     if len(data["password"]) < 8:
-        return {"error": "Password must be at least 8 characters long"}, 400
+        return "Password must be at least 8 characters long", 400
     if len(data["firstName"]) > 50:
-        return {"error": "First name must be less than 50 characters long"}, 400
+        return "First name must be less than 50 characters long", 400
     if len(data["lastName"]) > 50:
-        return {"error": "Last name must be less than 50 characters long"}, 400
+        return "Last name must be less than 50 characters long", 400
     if len(data["description"]) > 150:
-        return {"error": "Description must be less than 150 characters long"}, 400
+        return "Description must be less than 150 characters long", 400
     if not data["pictureData"].startswith("data:image/"):
-        return {"error": "Picture data must be an image"}, 400
+        return "Picture data must be an image", 400
     if (len(data["pictureData"]) / 1024) / 1024 > 10:
-        return {"error": "Picture must be less than 10MB"}, 400
+        return "Picture must be less than 10MB", 400
     scan_results = {
         "firstName": None,
         "lastName": None,
@@ -303,7 +291,7 @@ def user_validation(data: dict) -> tuple[dict, int]:
         thread.join()
     for key, value in scan_results.items():
         if not value:
-            return {"error": f"{key} contains inappropriate content"}, 400
+            return f"{key} contains inappropriate content", 400
     return {}, 0
 
 
@@ -381,6 +369,7 @@ def create_event():
         dateEnd=data["dateEnd"],
         location=data["location"],
         bannerImage=str.encode(data["bannerImage"]),
+        attendees=[data["creator"]],
         creator=data["creator"],
     )
     db.session.add(event)
