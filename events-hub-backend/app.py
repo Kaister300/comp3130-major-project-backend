@@ -495,5 +495,11 @@ def get_events_api(event_id=None):
     return jsonify(event.to_dict())
 
 
+@app.route("/api/events/<event_id>/attendees", methods=["GET"])
+def get_event_attendees(event_id):
+    event = db.get_or_404(Event, event_id)
+    return jsonify(event.attendees)
+
+
 if __name__ == "__main__":
     app.run(HOSTNAME, PORT, debug=True)
