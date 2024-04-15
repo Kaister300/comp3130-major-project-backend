@@ -1,3 +1,13 @@
+"""
+Flask backend for the Events Hub application.
+Used in conjunction with the frontend to provide a full-stack application.
+The frontend is a mobile application made for the COMP3130 Mobile Application Development Course.
+Server should have basic security but is not intended for production use. Will only be active
+during the course duration.
+
+Created by: Kaister300
+"""
+
 import os
 import logging
 import secrets
@@ -5,33 +15,47 @@ import string
 import base64
 import datetime
 from threading import Thread
+from io import BytesIO
 import requests
 
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, Response, session, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
-from markupsafe import escape, escape_silent, Markup
 from jsonschema import validate, ValidationError
 from random_word import RandomWords
+from PIL import Image
+import structlog
 
-from Models import User, Event, db
+from models import User, UserTokens, Event, db
 
-logger = logging.getLogger("events-hub-backend")
-logging.basicConfig(level=logging.INFO)
+# Set up logger
+structlog.stdlib.recreate_defaults(log_level=logging.INFO)
+logger = structlog.get_logger("events-hub-backend")
 
+# Load env variables from .env
+# Mostly for local testing.
 load_dotenv()
 
+# App Environment Variables
 HOSTNAME = os.getenv("HOSTNAME", "localhost")
 PORT = int(os.getenv("PORT", "3000"))
+ENABLE_UNSAFE_ADMIN = os.getenv("ENABLE_UNSAFE_ADMIN", "False").lower() == "true"
 
+# Flask App Configuration
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///events-hub.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.template_folder = "templates"
 app.secret_key = os.getenv("SECRET_KEY")
 if not app.secret_key:
-    app.secret_key = secrets.token_hex(16)
+    logger.error(
+        "No secret key found in environment variables. \
+Please generate one using 'secrets.token_hex(16)' \
+and as it to the .env file as 'SECRET_KEY'."
+    )
+    os._exit(1)
 
+# Initialise the database
 db.init_app(app)
 with app.app_context():
     db.create_all()
@@ -41,7 +65,7 @@ def generate_admin_username():
     """Generates a random passphrase for the admin user."""
     r = RandomWords()
     username = "-".join([r.get_random_word() for _ in range(3)])
-    logger.info("Generated admin username: %s", username)
+    logger.info(f"Generated admin username: {username}")
     return username
 
 
@@ -51,7 +75,7 @@ def generate_admin_password():
         secrets.choice(string.ascii_letters + string.punctuation + string.digits)
         for _ in range(12)
     )
-    logger.info("Generated admin password: %s", pwd)
+    logger.info(f"Generated admin password: {pwd}")
     return pwd
 
 
@@ -63,8 +87,25 @@ ADMIN_DETAILS = {
     "incorrect_attempts": 0,
 }
 
+SUPPORTED_IMAGES = [
+    "image/apng",
+    "image/avif",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/svg+xml",
+    "image/webp",
+]
 
-def scan_image(base64_uri: str) -> bool:
+# Duplicated Literals. Here to satisfy the linter.
+IMAGE_TAG = "data:image/"
+INVALID_IMAGE_MESSAGE = "Invalid image format"
+IMAGE_ERROR_MESSAGE = "Image error"
+UNSUPPORTED_IMAGE_MESSAGE = "Unsupported image format"
+LOGIN_INCORRECT_MESSAGE = "Login Incorrect"
+
+
+def scan_image(base64_str: str) -> bool:
     """
     Scans the image for any malicious content.
     Uses sightengine API for scanning.
@@ -75,7 +116,7 @@ def scan_image(base64_uri: str) -> bool:
         "api_user": os.getenv("SIGHTENGINE_USER"),
         "api_secret": os.getenv("SIGHTENGINE_SECRET"),
     }
-    files = {"media": base64.b64decode(base64_uri.split(",")[1])}
+    files = {"media": base64.b64decode(base64_str)}
     r = requests.post(sightengine_url, params=params, files=files, timeout=10)
     return process_image_scan(r.json())
 
@@ -87,6 +128,12 @@ def process_image_scan(results: dict) -> bool:
     if results["summary"]["action"] == "reject":
         return False
     return True
+
+
+def load_image(base64_str: str) -> Image:
+    """Loads the image from the base64 string."""
+    image = Image.open(BytesIO(base64.b64decode(base64_str)))
+    return image
 
 
 def scan_text(data: str):
@@ -108,7 +155,7 @@ def scan_text(data: str):
 
 def process_text_scan(results: dict) -> bool:
     """Sets the conditions for a safe text from sightengine API results."""
-    logging.info("Text scan results: %s", results)
+    logger.info(f"Text scan results: {results}")
     if results["status"] != "success":
         return False
     if "profanity" in results and results["profanity"]["matches"]:
@@ -118,6 +165,7 @@ def process_text_scan(results: dict) -> bool:
 
 @app.context_processor
 def inject_admin_login():
+    """Adds log in status to Jinja2 variables."""
     admin_logged_in = session.get("admin_token") is not None
     return {"admin_logged_in": admin_logged_in}
 
@@ -125,6 +173,7 @@ def inject_admin_login():
 # Landing page for the website
 @app.route("/")
 def index():
+    """Landing page for the website."""
     return render_template("index.html")
 
 
@@ -132,11 +181,13 @@ def index():
 # Administrator page
 @app.route("/admin", methods=["GET"])
 def admin():
+    """Admin page for the website."""
     return render_template("admin.html")
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
+    """Login logic for the admin page."""
     if request.method == "GET":
         return render_template("admin_pages/login.html")
 
@@ -152,7 +203,7 @@ def admin_login():
     try:
         validate(data, login_schema)
     except ValidationError:
-        logging.exception("Admin login validation error")
+        logger.exception("Admin login validation error")
         # Not returning the actual error message for security reasons
         return {"error": "Admin Login Incorrect"}, 400
 
@@ -164,7 +215,7 @@ def admin_login():
         if ADMIN_DETAILS["incorrect_attempts"] >= 3:
             ADMIN_DETAILS["password"] = generate_admin_password()
             ADMIN_DETAILS["incorrect_attempts"] = 0
-            logging.warning("Incorrect attempt to cause admin password reset: %s", data)
+            logger.warning(f"Incorrect attempt to cause admin password reset: {data}")
         return {"error": "Admin Login Incorrect"}, 400
 
     # Create/Regenerate admin token on successful login
@@ -174,6 +225,7 @@ def admin_login():
 
 @app.route("/admin/logout", methods=["GET"])
 def admin_logout():
+    """Logs out the admin by deleting the token from the session."""
     session.pop("admin_token", None)
     return Response(status=200, response="Admin Logout Successful")
 
@@ -181,12 +233,13 @@ def admin_logout():
 @app.route("/admin/users", methods=["GET"])
 @app.route("/admin/users/<user_id>", methods=["GET"])
 def admin_users(user_id=None):
+    """Returns the users in the database. Can specify user by ID."""
     if user_id is None:
         users = [user.to_dict() for user in User.query.all()]
         return render_template("admin_pages/users.html", users=users)
 
     if "admin_token" not in session:
-        return "Unauthorized", 401
+        return "Unauthorised", 401
 
     user = db.get_or_404(User, user_id)
     return jsonify(user.to_dict())
@@ -194,11 +247,12 @@ def admin_users(user_id=None):
 
 @app.route("/admin/create_user", methods=["GET", "POST"])
 def create_user():
+    """Creates a user in the database."""
     if request.method == "GET":
         return render_template("admin_pages/create_user.html")
 
     if "admin_token" not in session:
-        return Response(status=401, response="Unauthorized")
+        return Response(status=401, response="Unauthorised")
 
     # Picture data is base64 encoded image data.
     user_schema = {
@@ -209,6 +263,7 @@ def create_user():
             "description": {"type": "string"},
             "password": {"type": "string"},
             "pictureData": {"type": "string"},
+            "unsafeAdmin": {"type": "boolean"},
         },
         "required": [
             "id",
@@ -217,6 +272,7 @@ def create_user():
             "password",
             "description",
             "pictureData",
+            "unsafeAdmin",
         ],
     }
     data = request.json
@@ -224,16 +280,42 @@ def create_user():
         validate(data, user_schema)
     except ValidationError as e:
         return {"error": e.message}, 400
+
     # Database Field Validation
     (msg, status) = user_validation(data)
     if msg and status:
         return msg, status
-    password_hash = generate_password_hash(data["password"]).split("$")[-1]
+
+    # Validate picture data
+    if data["pictureData"].startswith(IMAGE_TAG):
+        data["pictureData"] = data["pictureData"].split(",")[1]
+    try:
+        img: Image = load_image(data["pictureData"])
+    except Image.UnidentifiedImageError:
+        logger.exception(IMAGE_ERROR_MESSAGE)
+        return INVALID_IMAGE_MESSAGE, 400
+    mimetype = img.get_format_mimetype()
+    if mimetype not in SUPPORTED_IMAGES:
+        return UNSUPPORTED_IMAGE_MESSAGE, 400
+
+    # External scanning of the image and text
+    if data["unsafeAdmin"] and not ENABLE_UNSAFE_ADMIN:
+        return "Unsafe admin creation is disabled", 400
+    if not data["unsafeAdmin"]:
+        msg, status = user_scanning(data)
+        if msg and status:
+            return msg, status
+
+    # Construct picture data
+    data["pictureData"] = f"data:{mimetype};base64,{data['pictureData']}"
+
+    # Create user. NOTE: Hash is 162 bytes long with the default method.
+    password_hash = generate_password_hash(data["password"])
     user = User(
         id=data["id"],
-        firstName=str(escape_silent(data["firstName"])),
-        lastName=str(escape_silent(data["lastName"])),
-        description=str(escape_silent(data["description"])),
+        firstName=data["firstName"],
+        lastName=data["lastName"],
+        description=data["description"],
         profilePicture=str.encode(data["pictureData"]),
         joinedEvents=[],
         passwordHash=password_hash,
@@ -243,7 +325,7 @@ def create_user():
     return Response(status=200, response="User created successfully")
 
 
-def user_validation(data: dict) -> tuple[dict, int]:
+def user_validation(data: dict) -> tuple[str, int]:
     """Validates the user data before creating the user."""
     try:
         int(data["id"])
@@ -259,10 +341,13 @@ def user_validation(data: dict) -> tuple[dict, int]:
         return "Last name must be less than 50 characters long", 400
     if len(data["description"]) > 150:
         return "Description must be less than 150 characters long", 400
-    if not data["pictureData"].startswith("data:image/"):
-        return "Picture data must be an image", 400
     if (len(data["pictureData"]) / 1024) / 1024 > 10:
         return "Picture must be less than 10MB", 400
+    return "", 0
+
+
+def user_scanning(data: dict) -> tuple[str, int]:
+    """Scans the user data for inappropriate content before creating the user."""
     scan_results = {
         "firstName": None,
         "lastName": None,
@@ -277,7 +362,7 @@ def user_validation(data: dict) -> tuple[dict, int]:
             validation_func = scan_text
         threads.append(
             Thread(
-                target=user_validation_target,
+                target=user_scanning_target,
                 args=(
                     scan_results,
                     data,
@@ -292,26 +377,26 @@ def user_validation(data: dict) -> tuple[dict, int]:
     for key, value in scan_results.items():
         if not value:
             return f"{key} contains inappropriate content", 400
-    return {}, 0
+    return "", 0
 
 
-def user_validation_target(
+def user_scanning_target(
     scan_results: dict, data: dict, key: str, validation_func
 ) -> None:
-    """Thread target function for user_validation."""
-    logging.info(scan_results)
+    """Thread target function for user_scanning."""
     scan_results.update({key: validation_func(data[key])})
 
 
 @app.route("/admin/events", methods=["GET"])
 @app.route("/admin/events/<event_id>", methods=["GET"])
 def admin_events(event_id=None):
+    """Returns the events in the database. Can specify event by ID."""
     if event_id is None:
         events = [event.to_dict() for event in Event.query.all()]
         return render_template("admin_pages/events.html", events=events)
 
     if "admin_token" not in session:
-        return "Unauthorized", 401
+        return "Unauthorised", 401
 
     event = db.get_or_404(Event, event_id)
     return jsonify(event.to_dict())
@@ -319,13 +404,295 @@ def admin_events(event_id=None):
 
 @app.route("/admin/create_event", methods=["GET", "POST"])
 def create_event():
+    """Creates an event in the database."""
     if request.method == "GET":
         users = [user.to_dict() for user in User.query.all()]
         return render_template("admin_pages/create_event.html", users=users)
 
     if "admin_token" not in session:
-        return Response(status=401, response="Unauthorized")
+        return Response(status=401, response="Unauthorised")
 
+    event_schema = {
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "dateStart": {"type": "string"},
+            "dateEnd": {"type": "string"},
+            "location": {
+                "type": "object",
+                "properties": {
+                    "room": {"type": "string"},
+                    "address": {"type": "string"},
+                },
+            },
+            "bannerImage": {"type": "string"},
+            "creator": {"type": "string"},
+            "unsafeAdmin": {"type": "boolean"},
+        },
+        "required": [
+            "name",
+            "description",
+            "dateStart",
+            "dateEnd",
+            "location",
+            "bannerImage",
+            "creator",
+            "unsafeAdmin",
+        ],
+    }
+    data = request.json
+    try:
+        validate(data, event_schema)
+    except ValidationError as e:
+        return {"error": e.message}, 400
+
+    # Database Field Validation
+    (msg, status) = event_validation(data)
+    if msg and status:
+        return msg, status
+
+    # Validate picture data
+    if data["bannerImage"].startswith(IMAGE_TAG):
+        data["bannerImage"] = data["bannerImage"].split(",")[1]
+    try:
+        img: Image = load_image(data["bannerImage"])
+    except Image.UnidentifiedImageError:
+        logger.exception(IMAGE_ERROR_MESSAGE)
+        return INVALID_IMAGE_MESSAGE, 400
+    mimetype = img.get_format_mimetype()
+    if mimetype not in SUPPORTED_IMAGES:
+        return UNSUPPORTED_IMAGE_MESSAGE, 400
+
+    # External scanning of the image and text
+    if data["unsafeAdmin"] and not ENABLE_UNSAFE_ADMIN:
+        return "Unsafe admin creation is disabled", 400
+    if not data["unsafeAdmin"]:
+        msg, status = event_scanning(data)
+        if msg and status:
+            return msg, status
+
+    # Construct picture data
+    data["bannerImage"] = f"data:{mimetype};base64,{data['bannerImage']}"
+
+    # Create event
+    event = Event(
+        name=data["name"],
+        description=data["description"],
+        dateStart=data["dateStart"],
+        dateEnd=data["dateEnd"],
+        location=data["location"],
+        bannerImage=str.encode(data["bannerImage"]),
+        attendees=[data["creator"]],
+        creator=data["creator"],
+    )
+    db.session.add(event)
+    db.session.commit()
+    return Response(status=200, response="Event created successfully")
+
+
+def event_validation(data) -> tuple[str, int]:
+    """Validates the event data before creating the event."""
+    if User.query.filter_by(id=data["creator"]).first() is None:
+        return "Creator ID does not exist", 400
+    if len(data["name"]) > 100:
+        return "Event name must be less than 100 characters long", 400
+    if len(data["description"]) > 500:
+        return "Event description must be less than 500 characters long", 400
+    try:
+        data["dateStart"] = datetime.datetime.strptime(
+            data["dateStart"], "%Y-%m-%dT%H:%M:%S.%f"
+        )
+        data["dateEnd"] = datetime.datetime.strptime(
+            data["dateEnd"], "%Y-%m-%dT%H:%M:%S.%f"
+        )
+    except ValueError:
+        return "Invalid date format", 400
+    if data["dateStart"] > data["dateEnd"]:
+        return "Event start date must be before end date", 400
+    if (len(data["bannerImage"]) / 1024) / 1024 > 10:
+        return "Banner image must be less than 10MB", 400
+    return "", 0
+
+
+def event_scanning(data: dict) -> tuple[str, int]:
+    """
+    Scans the event data for inappropriate content before creating the event.
+    Can be skipped by setting the 'unsafeAdmin' field to True.
+    """
+    scan_results = {
+        "name": None,
+        "description": None,
+        "location": None,
+        "bannerImage": None,
+    }
+    threads: list[Thread] = []
+    for key in scan_results:
+        if key == "bannerImage":
+            validation_func = scan_image
+        else:
+            validation_func = scan_text
+        threads.append(
+            Thread(
+                target=event_scanning_target,
+                args=(
+                    scan_results,
+                    data,
+                    key,
+                    validation_func,
+                ),
+            )
+        )
+        threads[-1].start()
+    for thread in threads:
+        thread.join()
+    for key, value in scan_results.items():
+        if not value:
+            return f"{key} contains inappropriate content", 400
+    return "", 0
+
+
+def event_scanning_target(
+    scan_results: dict, data: dict, key: str, validation_func
+) -> None:
+    """Thread target function for event_scanning."""
+    scan_results.update({key: validation_func(data[key])})
+
+
+# ================== API Routes ==================
+@app.route("/api/login", methods=["GET", "POST"])
+def user_login():
+    """Login logic for the user."""
+    # Return webpage for webview in app
+    if request.method == "GET":
+        return render_template("login.html")
+
+    # Handle login requets
+    login_schema = {
+        "properties": {
+            "id": {"type": "string"},
+            "password": {"type": "string"},
+        },
+        "required": ["id", "password"],
+    }
+
+    data = request.json
+    try:
+        validate(data, login_schema)
+    except ValidationError:
+        logger.exception("Login validation error")
+        # Not returning the actual error message for security reasons
+        return {"error": LOGIN_INCORRECT_MESSAGE}, 400
+
+    # Login user with password.
+    user = db.get_or_404(User, data["id"])
+
+    if len(data["password"]) < 8:
+        return {"error": LOGIN_INCORRECT_MESSAGE}, 400
+
+    if not check_password_hash(user.passwordHash, data["password"]):
+        return {"error": LOGIN_INCORRECT_MESSAGE}, 400
+
+    logger.info(f"User logged in: {user.id}")
+
+    # Return token for user.
+    token = UserTokens.query.filter_by(user_id=user.id).first()
+    if not token:
+        token = UserTokens(user_id=user.id, token=secrets.token_hex(64))
+        db.session.add(token)
+        db.session.commit()
+
+    return token.to_dict(), 200
+
+
+@app.route("/api/logout", methods=["POST"])
+def user_logout():
+    """Logs out the user by deleting the token from the database."""
+    # Check token from header.
+    auth_header = request.headers.get("Authorisation")
+    if not auth_header:
+        return {"error": "Provide a token in the header"}, 400
+
+    token_entry = UserTokens.query.filter_by(token=auth_header).first()
+    if not token_entry:
+        return {"error": "Invalid token"}, 400
+
+    db.session.delete(token_entry)
+    db.session.commit()
+    return Response(status=200, response="User logged out")
+
+
+@app.route("/api/validate_token", methods=["POST"])
+def validate_token():
+    """Validates the token for the user."""
+    # Check token from header.
+    auth_header = request.headers.get("Authorisation")
+    if not auth_header:
+        return {"error": "Provide a token in the header"}, 400
+
+    token_entry = UserTokens.query.filter_by(token=auth_header).first()
+    if not token_entry:
+        return {"error": "Invalid token"}, 400
+
+    return Response(status=200, response="Token is valid")
+
+
+@app.route("/api/users", methods=["GET"])
+@app.route("/api/users/<user_id>", methods=["GET"])
+def get_users_api(user_id=None):
+    """Returns the users in the database. Can specify user by ID."""
+    if user_id is None:
+        users = [user.to_dict() for user in User.query.all()]
+        return jsonify(users)
+
+    user = db.get_or_404(User, user_id)
+
+    token = request.headers.get("Authorisation")
+    if token:
+        token_entry = UserTokens.query.filter_by(token=token).first()
+        if token_entry and token_entry.user_id == user.id:
+            return jsonify(user.to_dict_authorised())
+
+    return jsonify(user.to_dict())
+
+
+@app.route("/api/events", methods=["GET"])
+@app.route("/api/events/<event_id>", methods=["GET"])
+def get_events_api(event_id=None):
+    """Returns the events in the database. Can specify event by ID."""
+    if event_id is None:
+        events = [event.to_dict() for event in Event.query.all()]
+        return jsonify(events)
+
+    event = db.get_or_404(Event, event_id)
+    return jsonify(event.to_dict())
+
+
+@app.route("/api/events/<event_id>/attendees", methods=["GET"])
+def get_event_attendees(event_id):
+    """Returns the attendees of the event."""
+    event = db.get_or_404(Event, event_id)
+    return jsonify(event.attendees)
+
+
+@app.route("/api/create_event", methods=["POST"])
+def create_event_api():
+    """Creates an event in the database. Must be authenticated user."""
+    # Check token from header.
+    if not (auth_token := request.headers.get("Authorisation")):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if token exists in the database.
+    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if user from token exists in the database.
+    # Remove token if user does not exist.
+    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
+        db.session.delete(token_entry)
+        db.session.commit()
+        return {"error": "Unauthorised"}, 401
+
+    # Validate request body
     event_schema = {
         "properties": {
             "name": {"type": "string"},
@@ -358,13 +725,41 @@ def create_event():
     except ValidationError as e:
         return {"error": e.message}, 400
 
-    # Database Field Validation
+    # Check if creator is holder of the token.
+    if data["creator"] != user.id:
+        return {"error": "Unauthorised"}, 401
+
+    # Validate event data
     (msg, status) = event_validation(data)
     if msg and status:
-        return msg, status
+        return {"error": msg}, status
+
+    # Validate picture data
+    if data["bannerImage"].startswith(IMAGE_TAG):
+        data["bannerImage"] = data["bannerImage"].split(",")[1]
+    try:
+        img: Image = load_image(data["bannerImage"])
+    except Image.UnidentifiedImageError:
+        logger.exception(IMAGE_ERROR_MESSAGE)
+        return {"error": INVALID_IMAGE_MESSAGE}, 400
+    mimetype = img.get_format_mimetype()
+    if mimetype not in SUPPORTED_IMAGES:
+        return {"error": UNSUPPORTED_IMAGE_MESSAGE}, 400
+    if getattr(img, "is_animated", False):
+        return {"error": "Animated images are not supported"}, 400
+
+    # External scanning of the image and text
+    msg, status = event_scanning(data)
+    if msg and status:
+        return {"error": msg}, status
+
+    # Construct picture data
+    data["bannerImage"] = f"data:{mimetype};base64,{data['bannerImage']}"
+
+    # Create event
     event = Event(
-        name=str(escape_silent(data["name"])),
-        description=str(escape_silent(data["description"])),
+        name=data["name"],
+        description=data["description"],
         dateStart=data["dateStart"],
         dateEnd=data["dateEnd"],
         location=data["location"],
@@ -374,131 +769,7 @@ def create_event():
     )
     db.session.add(event)
     db.session.commit()
-    return Response(status=200, response="Event created successfully")
-
-
-def event_validation(data) -> tuple[str, int]:
-    """Validates the event data before creating the event."""
-    if User.query.filter_by(id=data["creator"]).first() is None:
-        return "Creator ID does not exist", 400
-    if len(data["name"]) > 100:
-        return "Event name must be less than 100 characters long", 400
-    if len(data["description"]) > 500:
-        return "Event description must be less than 500 characters long", 400
-    try:
-        data["dateStart"] = datetime.datetime.strptime(
-            data["dateStart"], "%Y-%m-%dT%H:%M"
-        )
-        data["dateEnd"] = datetime.datetime.strptime(data["dateEnd"], "%Y-%m-%dT%H:%M")
-    except ValueError:
-        return "Invalid date format", 400
-    if data["dateStart"] > data["dateEnd"]:
-        return "Event start date must be before end date", 400
-    if not data["bannerImage"].startswith("data:image/"):
-        return "Banner image data must be an image", 400
-    if (len(data["bannerImage"]) / 1024) / 1024 > 10:
-        return "Banner image must be less than 10MB", 400
-    scan_results = {
-        "name": None,
-        "description": None,
-        "location": None,
-        "bannerImage": None,
-    }
-    threads: list[Thread] = []
-    for key in scan_results:
-        if key == "bannerImage":
-            validation_func = scan_image
-        else:
-            validation_func = scan_text
-        threads.append(
-            Thread(
-                target=event_validation_target,
-                args=(
-                    scan_results,
-                    data,
-                    key,
-                    validation_func,
-                ),
-            )
-        )
-        threads[-1].start()
-    for thread in threads:
-        thread.join()
-    for key, value in scan_results.items():
-        if not value:
-            return f"{key} contains inappropriate content", 400
-    return {}, 0
-
-
-def event_validation_target(
-    scan_results: dict, data: dict, key: str, validation_func
-) -> None:
-    """Thread target function for event_validation."""
-    scan_results.update({key: validation_func(data[key])})
-
-
-# ================== API Routes ==================
-@app.route("/api/login", methods=["GET", "POST"])
-def user_login():
-    # Return webpage for webview in app
-    if request.method == "GET":
-        return render_template("login.html")
-
-    # Handle login requets
-    login_schema = {
-        "properties": {
-            "id": {"type": "string"},
-            "password": {"type": "string"},
-        },
-        "required": ["id", "password"],
-    }
-
-    data = request.json
-    logger.info("Login request: %s", data)
-    try:
-        validate(data, login_schema)
-    except ValidationError:
-        logging.exception("Login validation error")
-        # Not returning the actual error message for security reasons
-        return {"error": "Login Incorrect"}, 400
-    # TODO: Add login logic here
-    user = db.get_or_404(User, data["id"])
-
-    if len(data["password"]) < 8:
-        return {"error": "Login Incorrect"}, 400
-
-    if not check_password_hash(user.passwordHash, data["password"]):
-        return {"error": "Login Incorrect"}, 400
-
-    return {"token": "token"}, 200
-
-
-@app.route("/api/users", methods=["GET"])
-@app.route("/api/users/<user_id>", methods=["GET"])
-def get_users_api(user_id=None):
-    if user_id is None:
-        users = [user.to_dict() for user in User.query.all()]
-        return jsonify(users)
-
-    user = db.get_or_404(User, user_id)
-    return jsonify(user.to_dict())
-
-
-@app.route("/api/events", methods=["GET"])
-@app.route("/api/events/<event_id>", methods=["GET"])
-def get_events_api(event_id=None):
-    if event_id is None:
-        events = [event.to_dict() for event in Event.query.all()]
-        return jsonify(events)
-
-    event = db.get_or_404(Event, event_id)
-    return jsonify(event.to_dict())
-
-
-@app.route("/api/events/<event_id>/attendees", methods=["GET"])
-def get_event_attendees(event_id):
-    event = db.get_or_404(Event, event_id)
-    return jsonify(event.attendees)
+    return {"event_id": event.id}, 200
 
 
 if __name__ == "__main__":

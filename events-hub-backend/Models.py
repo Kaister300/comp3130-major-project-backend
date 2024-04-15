@@ -1,3 +1,7 @@
+"""
+Module to hold the models for the database.
+"""
+
 import datetime
 from flask_sqlalchemy import SQLAlchemy
 
@@ -15,7 +19,7 @@ class User(db.Model):
     description = db.Column(db.String(150), nullable=False)
     profilePicture = db.Column(db.LargeBinary, nullable=False)
     joinedEvents = db.Column(db.JSON)
-    passwordHash = db.Column(db.String(128), nullable=False)
+    passwordHash = db.Column(db.String(162), nullable=False)
     created = db.Column(db.DateTime, default=datetime.datetime.now, nullable=False)
 
     def to_dict(self) -> dict:
@@ -72,5 +76,31 @@ class Event(db.Model):
             "dateEnd": self.dateEnd.strftime("%Y-%m-%d %H:%M:%S"),
             "location": self.location,
             "bannerImage": self.bannerImage.decode(),
+            "attendees": self.attendees,
             "creator": self.creator,
+        }
+
+
+class UserTokens(db.Model):
+    """Used to hold user tokens."""
+
+    __tablename__ = "user_tokens"
+    __table_args__ = (db.UniqueConstraint("user_id"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.String(15), db.ForeignKey("user.id"), nullable=False, unique=True
+    )
+    token = db.Column(db.String(128), nullable=False)
+    created = db.Column(db.DateTime, default=datetime.datetime.now, nullable=False)
+
+    def to_dict(self) -> dict:
+        """
+        Returns a dictionary representation of the UserTokens object.
+        SHOULD NEVER BE CALLED UNLESS SENDING TOKEN TO AUTHORISED USER.
+        """
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "token": self.token,
+            "created": self.created,
         }

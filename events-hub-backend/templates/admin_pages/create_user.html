@@ -36,6 +36,10 @@
                 <input type="file" class="form-control" id="profile_picture"  accept="image/png, image/jpeg" placeholder="Profile Picture" required>
                 <label class="input-group-text" for="profile_picture">Profile Picture</label>
             </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" value="" id="unsafe_admin">
+                <label class="form-check-label" for="unsafe_admin">Skip scanning?</label>
+            </div>
             <button class="w-100 btn btn-lg btn-primary" type="submit">Create User</button>
         </form>
         <div id="alerts-placeholder"></div>
@@ -90,7 +94,8 @@
                 lastName: $('#last_name').val(),
                 description: $('#description').val(),
                 password: $('#password').val(),
-                pictureData: $('#preview-picture').attr('src')
+                pictureData: $('#preview-picture').attr('src'),
+                unsafeAdmin: $('#unsafe_admin').is(':checked')
             };
             $.ajax({
                 url: '/admin/create_user',
@@ -104,7 +109,7 @@
                 },
                 error: function(response) {
                     console.log(response);
-                    $('#alerts-placeholder').html(`<div class="alert alert-danger" role="alert">${response}</div>`);
+                    $('#alerts-placeholder').html(`<div class="alert alert-danger" role="alert">${response.responseText}</div>`);
                 }
             });
         });

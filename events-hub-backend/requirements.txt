@@ -4,3 +4,7 @@ werkzeug==3.0.1
 jsonschema==4.21.1
 random-word==1.0.11
 python-dotenv==1.0.1
+pillow==10.3.0
+structlog==24.1.0
+rich==13.7.1
+uvicorn==0.29.0
