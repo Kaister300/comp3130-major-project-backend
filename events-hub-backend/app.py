@@ -123,6 +123,7 @@ def scan_image(base64_str: str) -> bool:
 
 def process_image_scan(results: dict) -> bool:
     """Sets the conditions for a safe image from sightengine API results."""
+    logger.info(f"Image scan results: {results}")
     if results["status"] != "success":
         return False
     if results["summary"]["action"] == "reject":
@@ -768,6 +769,136 @@ def create_event_api():
         creator=data["creator"],
     )
     db.session.add(event)
+    db.session.commit()
+    return {"event_id": event.id}, 200
+
+
+@app.route("/api/events/<event_id>/edit", methods=["DELETE"])
+def edit_event_api(event_id=None):
+    """Edits event on server."""
+    # Check token from header
+    if not (auth_token := request.headers.get("Authorisation")):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if token exists in the database
+    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if user from token exists in the database
+    # Remove token if user does not exist
+    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
+        db.session.delete(token_entry)
+        db.session.commit()
+        return {"error": "Unauthorised"}, 401
+
+    # Validate request body
+    event_schema = {
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "dateStart": {"type": "string"},
+            "dateEnd": {"type": "string"},
+            "location": {
+                "type": "object",
+                "properties": {
+                    "room": {"type": "string"},
+                    "address": {"type": "string"},
+                },
+            },
+            "bannerImage": {"type": "string"},
+            "creator": {"type": "string"},
+        },
+        "required": [
+            "name",
+            "description",
+            "dateStart",
+            "dateEnd",
+            "location",
+            "bannerImage",
+            "creator",
+        ],
+    }
+
+    data = request.json
+    try:
+        validate(data, event_schema)
+    except ValidationError as e:
+        return {"error": e.message}, 400
+
+    # Check if event exists
+    if not (event := Event.query.filter_by(id=event_id).first()):
+        return {"error": "Event does not exist"}, 404
+
+    # Check if creator is holder of the token
+    if token_entry.user_id != event.creator or data["creator"] != user.id:
+        return {"error": "Unauthorised"}, 401
+
+    # Validate event data
+    (msg, status) = event_validation(data)
+    if msg and status:
+        return {"error": msg}, status
+
+    # Validate picture data
+    if data["bannerImage"].startswith(IMAGE_TAG):
+        data["bannerImage"] = data["bannerImage"].split(",")[1]
+    try:
+        img: Image = load_image(data["bannerImage"])
+    except Image.UnidentifiedImageError:
+        logger.exception(IMAGE_ERROR_MESSAGE)
+        return {"error": INVALID_IMAGE_MESSAGE}, 400
+    mimetype = img.get_format_mimetype()
+    if mimetype not in SUPPORTED_IMAGES:
+        return {"error": UNSUPPORTED_IMAGE_MESSAGE}, 400
+    if getattr(img, "is_animated", False):
+        return {"error": "Animated images are not supported"}, 400
+
+    # External scanning of the image and text
+    msg, status = event_scanning(data)
+    if msg and status:
+        return {"error": msg}, status
+
+    # Construct picture data
+    data["bannerImage"] = f"data:{mimetype};base64,{data['bannerImage']}"
+
+    # Edit event
+    event.name = data["name"]
+    event.description = data["description"]
+    event.dateStart = data["dateStart"]
+    event.dateEnd = data["dateEnd"]
+    event.location = data["location"]
+    event.bannerImage = str.encode(data["bannerImage"])
+    db.session.commit()
+    return {"event_id": event.id}, 200
+
+
+@app.route("/api/events/<event_id>/delete", methods=["DELETE"])
+def delete_event_api(event_id=None):
+    """Deletes event on server."""
+    # Check token from header
+    if not (auth_token := request.headers.get("Authorisation")):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if token exists in the database
+    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if user from token exists in the database
+    # Remove token if user does not exist
+    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
+        db.session.delete(token_entry)
+        db.session.commit()
+        return {"error": "Unauthorised"}, 401
+
+    # Check if event exists
+    if not (event := Event.query.filter_by(id=event_id).first()):
+        return {"error": "Event does not exist"}, 404
+
+    # Check if token holder is the creator of the event
+    if token_entry.user_id != event.creator or user.id != event.creator:
+        return {"error": "Unauthorised"}, 401
+
+    # Delete event
+    db.session.delete(event)
     db.session.commit()
     return {"event_id": event.id}, 200
 

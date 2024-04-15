@@ -12,12 +12,11 @@ services:
     depends_on:
       - events-hub-backend
   events-hub-backend:
-    image: events-hub-backend
     build:
       context: ./
       dockerfile: events-hub-backend/Dockerfile
-    # ports:
-    #   - "3000"
+    volumes:
+      - ./events-hub-backend/instance/:/app/instance/
     environment:
       - SECRET_KEY=${SECRET_KEY}
       - ENABLE_UNSAFE_ADMIN=${ENABLE_UNSAFE_ADMIN:-false}
@@ -32,3 +31,4 @@ networks:
 
 volumes:
   nginx-conf:
+  backend-data:
