@@ -104,3 +104,24 @@ class UserTokens(db.Model):
             "token": self.token,
             "created": self.created,
         }
+
+
+class Reports(db.Model):
+    """Used to hold reports on events."""
+
+    __tablename__ = "reports"
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    user_id = db.Column(db.String(15), db.ForeignKey("user.id"), nullable=False)
+    created = db.Column(db.DateTime, default=datetime.datetime.now, nullable=False)
+
+    def to_dict(self) -> dict:
+        """
+        Returns a dictionary representation of the Reports object.
+        """
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "user_id": self.user_id,
+            "created": self.created,
+        }

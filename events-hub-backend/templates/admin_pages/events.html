@@ -30,6 +30,11 @@
                     </div>
                     <div class="card-footer">
                         <p class="card-text">Creator User Id: {{ event.creator }}</p>
+                        <div class="btn-group" role="group" aria-label="{{ event.id }} Event Options">
+                            <a href="/admin/event/{{ event.id }}/view" class="btn btn-primary view-event">View Event</a>
+                            <a href="/admin/event/{{ event.id }}/edit" class="btn btn-primary edit-event">Edit Event</a>
+                            <a href="/admin/event/{{ event.id }}/delete" class="btn btn-danger delete-event">Delete Event</a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -37,6 +42,7 @@
         </div>
     </div>
     <div class="b-example-divider"></div>
+    <div id="page-content-events"></div>
     {% endif %}
 </div>
 
@@ -62,3 +68,28 @@
         padding: 1rem;
     }
 </style>
+
+<script>
+    $(document).ready(function() {
+        $('.view-event').click(function(e) {
+            e.preventDefault();
+            $('#page-content-events').load($(this).attr('href'));
+        });
+        
+        $('.edit-event').click(function(e) {
+            e.preventDefault();
+            $('#page-content-events').load($(this).attr('href'));
+        });
+
+        $('.delete-event').click(function(e) {
+            e.preventDefault();
+            $.ajax({
+                url: $(this).attr('href'),
+                type: 'DELETE',
+                success: function() {
+                    $('#page-content').load('/admin/events')
+                }
+            });
+        });
+    });
+</script>

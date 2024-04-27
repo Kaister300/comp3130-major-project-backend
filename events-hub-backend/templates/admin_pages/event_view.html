@@ -1,0 +1,57 @@
+<div id="extended-event-view">
+    <div class="container">
+        <div class="col">
+            <div class="col-md-6">
+                <img src="{{event.bannerImage}}" id="event-banner" class="img-fluid" alt="Event Banner">
+            </div>
+            <div class="col-md-6">
+                <h1 id="event-name">{{event.name}}</h1>
+                <p id="event-description">{{event.description}}</p>
+                <p id="event-date-start">Start Time: {{event.dateStart}}</p>
+                <p id="event-date-end">End Time: {{event.dateEnd}}</p>
+                <p id="event-room">Room: {{event.location.room}}</p>
+                <p id="event-address">Address: {{event.location.address}}</p>
+                <p id="event-creator">Creator User Id: {{event.creator}}</p>
+                <h4>Attendees:</h4>
+                <ul id="event-attendees">
+                    {% for attendee in event.attendees %}
+                    <li>{{ attendee }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            <div>
+                <button class="btn btn-primary" id="edit-event">Edit Event</button>
+                <button class="btn btn-danger" id="delete-event">Delete Event</button>
+            </div>
+        </div>
+    </div>
+    <div class="b-example-divider"></div>
+    <div id="page-content-events-view"></div>
+</div>
+
+<style>
+    #extended-event-view {
+        display: flex;
+    }
+    #extended-event-view > div.container {
+        margin-top: 20px;
+    }
+</style>
+
+<script>
+    $(document).ready(function() {
+        $('#edit-event').click(function() {
+            $('#page-content-events-view').load('/admin/event/{{event.id}}/edit');
+        });
+
+        $('#delete-event').click(function() {
+            $.ajax({
+                url: '/admin/event/{{event.id}}/delete',
+                type: 'DELETE',
+                success: function() {
+                    $('#page-content').load('/admin/events');
+                }
+            });
+        });
+    });
+</script>

@@ -90,8 +90,8 @@
                 user_id: $('#user-select').val(),
                 name: $('#name').val(),
                 description: $('#description').val(),
-                dateStart: $('#date_start').val(),
-                dateEnd: $('#date_end').val(),
+                dateStart: $('#date_start').val()+":00.0",
+                dateEnd: $('#date_end').val()+":00.0",
                 location: {
                     room: $('#room').val(),
                     address: $('#address').val()

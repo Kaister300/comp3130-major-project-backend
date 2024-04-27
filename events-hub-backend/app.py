@@ -26,7 +26,7 @@ from random_word import RandomWords
 from PIL import Image
 import structlog
 
-from models import User, UserTokens, Event, db
+from models import User, UserTokens, Event, Reports, db
 
 # Set up logger
 structlog.stdlib.recreate_defaults(log_level=logging.INFO)
@@ -403,6 +403,28 @@ def admin_events(event_id=None):
     return jsonify(event.to_dict())
 
 
+@app.route("/admin/event/<event_id>/view", methods=["GET"])
+def admin_focused_event(event_id):
+    """Returns HTML view of event with specified ID."""
+    if "admin_token" not in session:
+        return "Unauthorised", 401
+
+    event = db.get_or_404(Event, event_id)
+    return render_template("admin_pages/event_view.html", event=event.to_dict())
+
+
+@app.route("/admin/event/<event_id>/delete", methods=["DELETE"])
+def admin_delete_event(event_id):
+    """Deletes event from server."""
+    if "admin_token" not in session:
+        return "Unauthorised", 401
+
+    event = db.get_or_404(Event, event_id)
+    db.session.delete(event)
+    db.session.commit()
+    return Response(status=200, response="Event deleted successfully")
+
+
 @app.route("/admin/create_event", methods=["GET", "POST"])
 def create_event():
     """Creates an event in the database."""
@@ -557,6 +579,33 @@ def event_scanning_target(
 ) -> None:
     """Thread target function for event_scanning."""
     scan_results.update({key: validation_func(data[key])})
+
+
+@app.route("/admin/reports", methods=["GET"])
+@app.route("/admin/reports/<report_id>", methods=["GET"])
+def admin_reports(report_id=None):
+    """Returns the reports in the database. Can specify report by ID."""
+    if report_id is None:
+        reports = [report.to_dict() for report in Reports.query.all()]
+        return render_template("admin_pages/reports.html", reports=reports)
+
+    if "admin_token" not in session:
+        return "Unauthorised", 401
+
+    report = db.get_or_404(Reports, report_id)
+    return jsonify(report.to_dict())
+
+
+@app.route("/admin/report/<report_id>/delete", methods=["DELETE"])
+def admin_delete_report(report_id):
+    """Deletes report from server."""
+    if "admin_token" not in session:
+        return "Unauthorised", 401
+
+    report = db.get_or_404(Reports, report_id)
+    db.session.delete(report)
+    db.session.commit()
+    return Response(status=200, response="Report deleted successfully")
 
 
 # ================== API Routes ==================
@@ -899,6 +948,42 @@ def delete_event_api(event_id=None):
 
     # Delete event
     db.session.delete(event)
+    db.session.commit()
+    return {"event_id": event.id}, 200
+
+
+@app.route("/api/events/<event_id>/report", methods=["POST"])
+def report_event_api(event_id=None):
+    """Reports event on server."""
+    # Check token from header
+    if not (auth_token := request.headers.get("Authorisation")):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if token exists in the database
+    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if user from token exists in the database
+    # Remove token if user does not exist
+    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
+        db.session.delete(token_entry)
+        db.session.commit()
+        return {"error": "Unauthorised"}, 401
+
+    # Check if event exists
+    if not (event := Event.query.filter_by(id=event_id).first()):
+        return {"error": "Event does not exist"}, 404
+
+    # Check if token holder is the creator of the event
+    if token_entry.user_id == event.creator:
+        return {"error": "Unauthorised"}, 401
+
+    # Report event
+    report = Reports(
+        event_id=event_id,
+        user_id=token_entry.user_id,
+    )
+    db.session.add(report)
     db.session.commit()
     return {"event_id": event.id}, 200
 

@@ -1,0 +1,69 @@
+<div class="reports-container">
+    <div class="b-example-divider"></div>
+
+    {% if not admin_logged_in %}
+    <div class="login-banner">
+        <h1 class="h3 mb-3 fw-normal">Please login to continue</h1>
+    </div>
+
+    {% else %}
+    <div class="d-flex flex-column align-items-stretch flex-shrink-0 bg-white" style="width: 380px;">
+        <h1>Reports List</h1>
+        <div class="list-group list-group-flush bottom-border scrollarea">
+            {% for report in reports %}
+            <div class="list-group-item list-group-item-action">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Reported Event: {{ report.event_id }}</h5>
+                        <p class="card-text">Reported By: {{ report.user_id }}</p>
+                        <p class="card-text">Reported At: {{ report.created }}</p>
+                    </div>
+                    <div class="card-footer">
+                        <p class="card-text">Report Id: {{ report.id }}</p>
+                        <div class="btn-group" role="group" aria-label="{{ report.id }} Report Options">
+                            <a href="/admin/event/{{ report.event_id }}/view" class="btn btn-primary view-report">View Event</a>
+                            <a href="/admin/report/{{ report.id }}/delete" class="btn btn-danger delete-report">Delete Report</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="b-example-divider"></div>
+    <div id="page-content-reports"></div>
+    {% endif %}
+</div>
+
+<style>
+    .reports-container {
+        display: flex;
+        flex: auto;
+    }
+
+    .login-banner {
+        flex: auto;
+        align-self: center;
+        text-align: center;
+    }
+</style>
+
+<script>
+    $(document).ready(function() {
+        $('.view-report').click(function(e) {
+            e.preventDefault();
+            $('#page-content-reports').load($(this).attr('href'));
+        });
+
+        $('.delete-report').click(function(e) {
+            e.preventDefault();
+            $.ajax({
+                url: $(this).attr('href'),
+                type: 'DELETE',
+                success: function() {
+                    $('#page-content').load('/admin/reports');
+                }
+            });
+        });
+    });
+</script>
