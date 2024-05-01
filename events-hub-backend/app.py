@@ -26,7 +26,7 @@ from random_word import RandomWords
 from PIL import Image
 import structlog
 
-from models import User, UserTokens, Event, Reports, db
+from Models import User, UserTokens, Event, Reports, db
 
 # Set up logger
 structlog.stdlib.recreate_defaults(log_level=logging.INFO)
@@ -37,9 +37,10 @@ logger = structlog.get_logger("events-hub-backend")
 load_dotenv()
 
 # App Environment Variables
-HOSTNAME = os.getenv("HOSTNAME", "localhost")
-PORT = int(os.getenv("PORT", "3000"))
-ENABLE_UNSAFE_ADMIN = os.getenv("ENABLE_UNSAFE_ADMIN", "False").lower() == "true"
+HOSTNAME: str = os.getenv("HOSTNAME", "localhost")
+PORT: int = int(os.getenv("PORT", "3000"))
+ENABLE_UNSAFE_ADMIN: bool = os.getenv("ENABLE_UNSAFE_ADMIN", "False").lower() == "true"
+logger.info(f"UNSAFE_ADMIN_STATUS: {ENABLE_UNSAFE_ADMIN}")
 
 # Flask App Configuration
 app = Flask(__name__)
