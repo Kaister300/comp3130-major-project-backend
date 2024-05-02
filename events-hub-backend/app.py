@@ -952,6 +952,76 @@ def delete_event_api(event_id=None):
     db.session.commit()
     return {"event_id": event.id}, 200
 
+@app.route("/api/events/<event_id>/join", methods=["POST"])
+def join_event_api(event_id):
+    """Joins event on server."""
+    # Check token from header
+    if not (auth_token := request.headers.get("Authorisation")):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if token exists in the database
+    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if user from token exists in the database
+    # Remove token if user does not exist
+    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
+        db.session.delete(token_entry)
+        db.session.commit()
+        return {"error": "Unauthorised"}, 401
+
+    # Check if event exists
+    if not (event := Event.query.filter_by(id=event_id).first()):
+        return {"error": "Event does not exist"}, 404
+
+    # Check if user is already attending the event
+    if user.id in event.attendees:
+        return {"error": "User is already attending the event"}, 400
+
+    # Join event
+    attendees_list: list = event.attendees.copy()
+    attendees_list.append(user.id)
+    event.attendees = attendees_list
+    db.session.commit()
+    return {"event_id": event.id}, 200
+
+@app.route("/api/events/<event_id>/leave", methods=["POST"])
+def leave_event_api(event_id):
+    """Leaves event on server."""
+    # Check token from header
+    if not (auth_token := request.headers.get("Authorisation")):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if token exists in the database
+    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+        return {"error": "Unauthorised"}, 401
+
+    # Check if user from token exists in the database
+    # Remove token if user does not exist
+    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
+        db.session.delete(token_entry)
+        db.session.commit()
+        return {"error": "Unauthorised"}, 401
+
+    # Check if event exists
+    if not (event := Event.query.filter_by(id=event_id).first()):
+        return {"error": "Event does not exist"}, 404
+
+    # Check if user is hosting the event
+    if user.id == event.creator:
+        return {"error": "User is hosting the event"}, 400
+
+    # Check if user is attending the event
+    if user.id not in event.attendees:
+        return {"error": "User is not attending the event"}, 400
+
+    # Leave event
+    attendees_list: list = event.attendees.copy()
+    attendees_list.remove(user.id)
+    event.attendees = attendees_list
+    db.session.commit()
+    return {"event_id": event.id}, 200
+
 
 @app.route("/api/events/<event_id>/report", methods=["POST"])
 def report_event_api(event_id=None):
