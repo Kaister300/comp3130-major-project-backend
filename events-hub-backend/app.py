@@ -19,6 +19,7 @@ from io import BytesIO
 import requests
 
 from dotenv import load_dotenv
+from functools import wraps
 from flask import Flask, render_template, request, Response, session, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from jsonschema import validate, ValidationError
@@ -171,6 +172,35 @@ def inject_admin_login():
     admin_logged_in = session.get("admin_token") is not None
     return {"admin_logged_in": admin_logged_in}
 
+def api_login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        logger.info("Hit API login required decorator")
+        # Check token from header
+        if not (auth_token := request.headers.get("Authorisation")):
+            return {"error": "Unauthorised"}, 401
+
+        # Check if token exists in the database
+        if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+            return {"error": "Unauthorised"}, 401
+
+        # Check if user from token exists in the database
+        # Remove token if user does not exist
+        if not (user := User.query.filter_by(id=token_entry.user_id).first()):
+            db.session.delete(token_entry)
+            db.session.commit()
+            return {"error": "Unauthorised"}, 401
+        logger.info("Passed API login required decorator")
+        return f(*args, **kwargs)
+    return decorated_function
+
+def get_token_entry(auth_token) -> UserTokens:
+    token_entry = UserTokens.query.filter_by(token=auth_token).first()
+    return token_entry
+
+def get_user_entry(token_entry) -> User:
+    user = User.query.filter_by(id=token_entry.user_id).first()
+    return user
 
 # Landing page for the website
 @app.route("/")
@@ -726,22 +756,9 @@ def get_event_attendees(event_id):
 
 
 @app.route("/api/create_event", methods=["POST"])
+@api_login_required
 def create_event_api():
     """Creates an event in the database. Must be authenticated user."""
-    # Check token from header.
-    if not (auth_token := request.headers.get("Authorisation")):
-        return {"error": "Unauthorised"}, 401
-
-    # Check if token exists in the database.
-    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
-        return {"error": "Unauthorised"}, 401
-
-    # Check if user from token exists in the database.
-    # Remove token if user does not exist.
-    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
-        db.session.delete(token_entry)
-        db.session.commit()
-        return {"error": "Unauthorised"}, 401
 
     # Validate request body
     event_schema = {
@@ -775,6 +792,10 @@ def create_event_api():
         validate(data, event_schema)
     except ValidationError as e:
         return {"error": e.message}, 400
+    
+    token = request.headers.get("Authorisation")
+    token_entry = get_token_entry(token)
+    user = get_user_entry(token_entry)
 
     # Check if creator is holder of the token.
     if data["creator"] != user.id:
@@ -824,22 +845,9 @@ def create_event_api():
 
 
 @app.route("/api/events/<event_id>/edit", methods=["DELETE"])
+@api_login_required
 def edit_event_api(event_id=None):
     """Edits event on server."""
-    # Check token from header
-    if not (auth_token := request.headers.get("Authorisation")):
-        return {"error": "Unauthorised"}, 401
-
-    # Check if token exists in the database
-    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
-        return {"error": "Unauthorised"}, 401
-
-    # Check if user from token exists in the database
-    # Remove token if user does not exist
-    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
-        db.session.delete(token_entry)
-        db.session.commit()
-        return {"error": "Unauthorised"}, 401
 
     # Validate request body
     event_schema = {
@@ -874,6 +882,10 @@ def edit_event_api(event_id=None):
         validate(data, event_schema)
     except ValidationError as e:
         return {"error": e.message}, 400
+
+    token = request.headers.get("Authorisation")
+    token_entry = get_token_entry(token)
+    user = get_user_entry(token_entry)
 
     # Check if event exists
     if not (event := Event.query.filter_by(id=event_id).first()):
@@ -922,21 +934,16 @@ def edit_event_api(event_id=None):
 
 
 @app.route("/api/events/<event_id>/delete", methods=["DELETE"])
+@api_login_required
 def delete_event_api(event_id=None):
     """Deletes event on server."""
-    # Check token from header
-    if not (auth_token := request.headers.get("Authorisation")):
-        return {"error": "Unauthorised"}, 401
 
-    # Check if token exists in the database
-    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+    token = request.headers.get("Authorisation")
+    token_entry = get_token_entry(token)
+    if not token_entry:
         return {"error": "Unauthorised"}, 401
-
-    # Check if user from token exists in the database
-    # Remove token if user does not exist
-    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
-        db.session.delete(token_entry)
-        db.session.commit()
+    user = User.query.filter_by(id=token_entry.user_id).first()
+    if not user:
         return {"error": "Unauthorised"}, 401
 
     # Check if event exists
@@ -953,21 +960,16 @@ def delete_event_api(event_id=None):
     return {"event_id": event.id}, 200
 
 @app.route("/api/events/<event_id>/join", methods=["POST"])
+@api_login_required
 def join_event_api(event_id):
     """Joins event on server."""
-    # Check token from header
-    if not (auth_token := request.headers.get("Authorisation")):
-        return {"error": "Unauthorised"}, 401
 
-    # Check if token exists in the database
-    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
+    token = request.headers.get("Authorisation")
+    token_entry = get_token_entry(token)
+    if not token_entry:
         return {"error": "Unauthorised"}, 401
-
-    # Check if user from token exists in the database
-    # Remove token if user does not exist
-    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
-        db.session.delete(token_entry)
-        db.session.commit()
+    user = User.query.filter_by(id=token_entry.user_id).first()
+    if not user:
         return {"error": "Unauthorised"}, 401
 
     # Check if event exists
@@ -986,21 +988,16 @@ def join_event_api(event_id):
     return {"event_id": event.id}, 200
 
 @app.route("/api/events/<event_id>/leave", methods=["POST"])
+@api_login_required
 def leave_event_api(event_id):
     """Leaves event on server."""
-    # Check token from header
-    if not (auth_token := request.headers.get("Authorisation")):
+    token = request.headers.get("Authorisation")
+    token_entry = get_token_entry(token)
+    if not token_entry:
         return {"error": "Unauthorised"}, 401
-
-    # Check if token exists in the database
-    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
-        return {"error": "Unauthorised"}, 401
-
-    # Check if user from token exists in the database
-    # Remove token if user does not exist
-    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
-        db.session.delete(token_entry)
-        db.session.commit()
+    
+    user = User.query.filter_by(id=token_entry.user_id).first()
+    if not user:
         return {"error": "Unauthorised"}, 401
 
     # Check if event exists
@@ -1024,21 +1021,12 @@ def leave_event_api(event_id):
 
 
 @app.route("/api/events/<event_id>/report", methods=["POST"])
+@api_login_required
 def report_event_api(event_id=None):
     """Reports event on server."""
-    # Check token from header
-    if not (auth_token := request.headers.get("Authorisation")):
-        return {"error": "Unauthorised"}, 401
-
-    # Check if token exists in the database
-    if not (token_entry := UserTokens.query.filter_by(token=auth_token).first()):
-        return {"error": "Unauthorised"}, 401
-
-    # Check if user from token exists in the database
-    # Remove token if user does not exist
-    if not (user := User.query.filter_by(id=token_entry.user_id).first()):
-        db.session.delete(token_entry)
-        db.session.commit()
+    token = request.headers.get("Authorisation")
+    token_entry = get_token_entry(token)
+    if not token_entry:
         return {"error": "Unauthorised"}, 401
 
     # Check if event exists
