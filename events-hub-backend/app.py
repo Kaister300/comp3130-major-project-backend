@@ -16,10 +16,10 @@ import base64
 import datetime
 from threading import Thread
 from io import BytesIO
+from functools import wraps
 import requests
 
 from dotenv import load_dotenv
-from functools import wraps
 from flask import Flask, render_template, request, Response, session, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from jsonschema import validate, ValidationError
@@ -27,7 +27,14 @@ from random_word import RandomWords
 from PIL import Image
 import structlog
 
-from Models import User, UserTokens, Event, Reports, db
+from models import User, UserTokens, Event, Reports, db
+from json_validation_schemas import (
+    ADMIN_LOGIN_SCHEMA,
+    ADMIN_USER_SCHEMA,
+    ADMIN_EVENT_SCHEMA,
+    API_LOGIN_SCHEMA,
+    API_EVENT_SCHEMA,
+)
 
 # Set up logger
 structlog.stdlib.recreate_defaults(log_level=logging.INFO)
@@ -89,6 +96,7 @@ ADMIN_DETAILS = {
     "incorrect_attempts": 0,
 }
 
+# Supported images to display on events hub service
 SUPPORTED_IMAGES = [
     "image/apng",
     "image/avif",
@@ -105,6 +113,7 @@ INVALID_IMAGE_MESSAGE = "Invalid image format"
 IMAGE_ERROR_MESSAGE = "Image error"
 UNSUPPORTED_IMAGE_MESSAGE = "Unsupported image format"
 LOGIN_INCORRECT_MESSAGE = "Login Incorrect"
+NO_EVENT_FOUND_MESSAGE = "Event does not exist"
 
 
 def scan_image(base64_str: str) -> bool:
@@ -172,7 +181,30 @@ def inject_admin_login():
     admin_logged_in = session.get("admin_token") is not None
     return {"admin_logged_in": admin_logged_in}
 
+
+def admin_login_required(f):
+    """
+    Custom function wrapper to validate user for Admin use.
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "admin_token" not in session:
+            if request.method == "GET":
+                return render_template("admin_pages/401_page.html")
+            else:
+                return Response(status=401, response="Unauthorised")
+        logger.info("Admin Authenticated")
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
 def api_login_required(f):
+    """
+    Custom function wrapper to validate user for API use.
+    """
+
     @wraps(f)
     def decorated_function(*args, **kwargs):
         logger.info("Hit API login required decorator")
@@ -192,21 +224,33 @@ def api_login_required(f):
             return {"error": "Unauthorised"}, 401
         logger.info("Passed API login required decorator")
         return f(*args, **kwargs)
+
     return decorated_function
 
+
 def get_token_entry(auth_token) -> UserTokens:
+    """Gets token entry from auth_token"""
     token_entry = UserTokens.query.filter_by(token=auth_token).first()
     return token_entry
 
+
 def get_user_entry(token_entry) -> User:
+    """Gets user entry from auth_token"""
     user = User.query.filter_by(id=token_entry.user_id).first()
     return user
+
 
 # Landing page for the website
 @app.route("/")
 def index():
     """Landing page for the website."""
     return render_template("index.html")
+
+
+class ValidationException(Exception):
+    """
+    Custom exception to raise if data validation fails.
+    """
 
 
 # ================== Admin Routes ==================
@@ -224,16 +268,9 @@ def admin_login():
         return render_template("admin_pages/login.html")
 
     # Handle login requets
-    login_schema = {
-        "properties": {
-            "username": {"type": "string"},
-            "password": {"type": "string"},
-        },
-        "required": ["username", "password"],
-    }
     data = request.json
     try:
-        validate(data, login_schema)
+        validate(data, ADMIN_LOGIN_SCHEMA)
     except ValidationError:
         logger.exception("Admin login validation error")
         # Not returning the actual error message for security reasons
@@ -264,79 +301,51 @@ def admin_logout():
 
 @app.route("/admin/users", methods=["GET"])
 @app.route("/admin/users/<user_id>", methods=["GET"])
+@admin_login_required
 def admin_users(user_id=None):
     """Returns the users in the database. Can specify user by ID."""
     if user_id is None:
         users = [user.to_dict() for user in User.query.all()]
         return render_template("admin_pages/users.html", users=users)
 
-    if "admin_token" not in session:
-        return "Unauthorised", 401
-
     user = db.get_or_404(User, user_id)
     return jsonify(user.to_dict())
 
 
+@app.route("/admin/users/<user_id>/delete", methods=["DELETE"])
+@admin_login_required
+def admin_user_delete(user_id):
+    """Deletes user from service"""
+    user = db.get_or_404(User, user_id)
+    db.session.delete(user)
+    db.session.commit()
+    return Response(status=200, response="User deleted")
+
+
 @app.route("/admin/create_user", methods=["GET", "POST"])
+@admin_login_required
 def create_user():
     """Creates a user in the database."""
     if request.method == "GET":
         return render_template("admin_pages/create_user.html")
 
-    if "admin_token" not in session:
-        return Response(status=401, response="Unauthorised")
-
-    # Picture data is base64 encoded image data.
-    user_schema = {
-        "properties": {
-            "id": {"type": "string"},
-            "firstName": {"type": "string"},
-            "lastName": {"type": "string"},
-            "description": {"type": "string"},
-            "password": {"type": "string"},
-            "pictureData": {"type": "string"},
-            "unsafeAdmin": {"type": "boolean"},
-        },
-        "required": [
-            "id",
-            "firstName",
-            "lastName",
-            "password",
-            "description",
-            "pictureData",
-            "unsafeAdmin",
-        ],
-    }
+    # Validate data json
     data = request.json
     try:
-        validate(data, user_schema)
+        validate(data, ADMIN_USER_SCHEMA)
     except ValidationError as e:
         return {"error": e.message}, 400
 
     # Database Field Validation
-    (msg, status) = user_validation(data)
-    if msg and status:
-        return msg, status
-
-    # Validate picture data
-    if data["pictureData"].startswith(IMAGE_TAG):
-        data["pictureData"] = data["pictureData"].split(",")[1]
     try:
-        img: Image = load_image(data["pictureData"])
-    except Image.UnidentifiedImageError:
-        logger.exception(IMAGE_ERROR_MESSAGE)
-        return INVALID_IMAGE_MESSAGE, 400
-    mimetype = img.get_format_mimetype()
-    if mimetype not in SUPPORTED_IMAGES:
-        return UNSUPPORTED_IMAGE_MESSAGE, 400
-
-    # External scanning of the image and text
-    if data["unsafeAdmin"] and not ENABLE_UNSAFE_ADMIN:
-        return "Unsafe admin creation is disabled", 400
-    if not data["unsafeAdmin"]:
-        msg, status = user_scanning(data)
-        if msg and status:
-            return msg, status
+        user_validation(data)
+        mimetype = photo_validation(data, "pictureData")
+        if data["unsafeAdmin"] and not ENABLE_UNSAFE_ADMIN:
+            raise ValidationError("Unsafe admin creation is disabled")
+        if not data["unsafeAdmin"]:
+            user_scanning(data)
+    except ValidationException as err:
+        return str(err), 400
 
     # Construct picture data
     data["pictureData"] = f"data:{mimetype};base64,{data['pictureData']}"
@@ -357,25 +366,27 @@ def create_user():
     return Response(status=200, response="User created successfully")
 
 
-def user_validation(data: dict) -> tuple[str, int]:
-    """Validates the user data before creating the user."""
+def user_validation(data: dict):
+    """
+    Validates the user data before creating the user.
+    Raises ValidationException if data is invalid.
+    """
     try:
         int(data["id"])
-    except ValueError:
-        return "User ID must be a number", 400
+    except ValueError as err:
+        raise ValidationException("User ID must be a number") from err
     if len(data["id"]) <= 6 or len(data["id"]) >= 16:
-        return "User ID must be between 7 and 15 digits long", 400
+        raise ValidationException("User ID must be between 7 and 15 digits long")
     if len(data["password"]) < 8:
-        return "Password must be at least 8 characters long", 400
+        raise ValidationException("Password must be at least 8 characters long")
     if len(data["firstName"]) > 50:
-        return "First name must be less than 50 characters long", 400
+        raise ValidationException("First name must be less than 50 characters long")
     if len(data["lastName"]) > 50:
-        return "Last name must be less than 50 characters long", 400
+        raise ValidationException("Last name must be less than 50 characters long")
     if len(data["description"]) > 150:
-        return "Description must be less than 150 characters long", 400
+        raise ValidationException("Description must be less than 150 characters long")
     if (len(data["pictureData"]) / 1024) / 1024 > 10:
-        return "Picture must be less than 10MB", 400
-    return "", 0
+        raise ValidationException("Picture must be less than 10MB")
 
 
 def user_scanning(data: dict) -> tuple[str, int]:
@@ -421,35 +432,29 @@ def user_scanning_target(
 
 @app.route("/admin/events", methods=["GET"])
 @app.route("/admin/events/<event_id>", methods=["GET"])
+@admin_login_required
 def admin_events(event_id=None):
     """Returns the events in the database. Can specify event by ID."""
     if event_id is None:
         events = [event.to_dict() for event in Event.query.all()]
         return render_template("admin_pages/events.html", events=events)
 
-    if "admin_token" not in session:
-        return "Unauthorised", 401
-
     event = db.get_or_404(Event, event_id)
     return jsonify(event.to_dict())
 
 
 @app.route("/admin/event/<event_id>/view", methods=["GET"])
+@admin_login_required
 def admin_focused_event(event_id):
     """Returns HTML view of event with specified ID."""
-    if "admin_token" not in session:
-        return "Unauthorised", 401
-
     event = db.get_or_404(Event, event_id)
     return render_template("admin_pages/event_view.html", event=event.to_dict())
 
 
 @app.route("/admin/event/<event_id>/delete", methods=["DELETE"])
+@admin_login_required
 def admin_delete_event(event_id):
     """Deletes event from server."""
-    if "admin_token" not in session:
-        return "Unauthorised", 401
-
     event = db.get_or_404(Event, event_id)
     db.session.delete(event)
     db.session.commit()
@@ -457,73 +462,32 @@ def admin_delete_event(event_id):
 
 
 @app.route("/admin/create_event", methods=["GET", "POST"])
+@admin_login_required
 def create_event():
     """Creates an event in the database."""
     if request.method == "GET":
         users = [user.to_dict() for user in User.query.all()]
         return render_template("admin_pages/create_event.html", users=users)
 
-    if "admin_token" not in session:
-        return Response(status=401, response="Unauthorised")
-
-    event_schema = {
-        "properties": {
-            "name": {"type": "string"},
-            "description": {"type": "string"},
-            "dateStart": {"type": "string"},
-            "dateEnd": {"type": "string"},
-            "location": {
-                "type": "object",
-                "properties": {
-                    "room": {"type": "string"},
-                    "address": {"type": "string"},
-                },
-            },
-            "bannerImage": {"type": "string"},
-            "creator": {"type": "string"},
-            "unsafeAdmin": {"type": "boolean"},
-        },
-        "required": [
-            "name",
-            "description",
-            "dateStart",
-            "dateEnd",
-            "location",
-            "bannerImage",
-            "creator",
-            "unsafeAdmin",
-        ],
-    }
+    # Validate data
     data = request.json
     try:
-        validate(data, event_schema)
+        validate(data, ADMIN_EVENT_SCHEMA)
     except ValidationError as e:
         return {"error": e.message}, 400
 
     # Database Field Validation
-    (msg, status) = event_validation(data)
-    if msg and status:
-        return msg, status
-
-    # Validate picture data
-    if data["bannerImage"].startswith(IMAGE_TAG):
-        data["bannerImage"] = data["bannerImage"].split(",")[1]
     try:
-        img: Image = load_image(data["bannerImage"])
-    except Image.UnidentifiedImageError:
-        logger.exception(IMAGE_ERROR_MESSAGE)
-        return INVALID_IMAGE_MESSAGE, 400
-    mimetype = img.get_format_mimetype()
-    if mimetype not in SUPPORTED_IMAGES:
-        return UNSUPPORTED_IMAGE_MESSAGE, 400
-
-    # External scanning of the image and text
-    if data["unsafeAdmin"] and not ENABLE_UNSAFE_ADMIN:
-        return "Unsafe admin creation is disabled", 400
-    if not data["unsafeAdmin"]:
-        msg, status = event_scanning(data)
-        if msg and status:
-            return msg, status
+        # Validate data
+        event_validation(data)
+        mimetype = photo_validation(data, "bannerImage")
+        # External scanning of the image and text
+        if data["unsafeAdmin"] and not ENABLE_UNSAFE_ADMIN:
+            raise ValidationException("Unsafe admin creation is disabled")
+        if not data["unsafeAdmin"]:
+            event_scanning(data)
+    except ValidationException as err:
+        return str(err), 400
 
     # Construct picture data
     data["bannerImage"] = f"data:{mimetype};base64,{data['bannerImage']}"
@@ -544,14 +508,62 @@ def create_event():
     return Response(status=200, response="Event created successfully")
 
 
-def event_validation(data) -> tuple[str, int]:
-    """Validates the event data before creating the event."""
+@app.route("/admin/event/<event_id>/edit", methods=["GET", "POST"])
+@admin_login_required
+def edit_event(event_id):
+    """Edits an event in the database."""
+    event = db.get_or_404(Event, event_id)
+    if request.method == "GET":
+        return render_template("admin_pages/event_edit.html", event=event.to_dict())
+
+    # Validate data json
+    data = request.json
+    try:
+        validate(data, ADMIN_EVENT_SCHEMA)
+    except ValidationError as e:
+        return {"error": e.message}, 400
+
+    try:
+        # Validate data
+        event_validation(data)
+        mimetype = photo_validation(data, "bannerImage")
+
+        # External scanning of the image and text
+        if data["unsafeAdmin"] and not ENABLE_UNSAFE_ADMIN:
+            raise ValidationException("Unsafe admin creation is disabled")
+        if not data["unsafeAdmin"]:
+            event_scanning(data)
+    except ValidationException as err:
+        return str(err), 400
+
+    # Construct picture data
+    data["bannerImage"] = f"data:{mimetype};base64,{data['bannerImage']}"
+
+    # Edit event
+    event.name = data["name"]
+    event.description = data["description"]
+    event.dateStart = data["dateStart"]
+    event.dateEnd = data["dateEnd"]
+    event.location = data["location"]
+    event.bannerImage = str.encode(data["bannerImage"])
+    db.session.add(event)
+    db.session.commit()
+    return Response(status=200, response="Event created successfully")
+
+
+def event_validation(data):
+    """
+    Validates the event data before creating the event.
+    Raises ValidationException if data is invalid.
+    """
     if User.query.filter_by(id=data["creator"]).first() is None:
-        return "Creator ID does not exist", 400
+        raise ValidationException("Creator ID does not exist")
     if len(data["name"]) > 100:
-        return "Event name must be less than 100 characters long", 400
+        raise ValidationException("Event name must be less than 100 characters long")
     if len(data["description"]) > 500:
-        return "Event description must be less than 500 characters long", 400
+        raise ValidationException(
+            "Event description must be less than 500 characters long"
+        )
     try:
         data["dateStart"] = datetime.datetime.strptime(
             data["dateStart"], "%Y-%m-%dT%H:%M:%S.%f"
@@ -559,19 +571,40 @@ def event_validation(data) -> tuple[str, int]:
         data["dateEnd"] = datetime.datetime.strptime(
             data["dateEnd"], "%Y-%m-%dT%H:%M:%S.%f"
         )
-    except ValueError:
-        return "Invalid date format", 400
+    except ValueError as err:
+        raise ValidationException("Invalid date format") from err
     if data["dateStart"] > data["dateEnd"]:
-        return "Event start date must be before end date", 400
+        raise ValidationException("Event start date must be before end date")
     if (len(data["bannerImage"]) / 1024) / 1024 > 10:
-        return "Banner image must be less than 10MB", 400
-    return "", 0
+        raise ValidationException("Banner image must be less than 10MB")
 
 
-def event_scanning(data: dict) -> tuple[str, int]:
+def photo_validation(data, photo_name) -> str:
+    """
+    Validates photo sent from client.
+    Returns mimetype of image.
+    Raises ValidationException if image sent is not supported.
+    """
+    if data[photo_name].startswith(IMAGE_TAG):
+        data[photo_name] = data[photo_name].split(",")[1]
+    try:
+        img: Image = load_image(data[photo_name])
+    except Image.UnidentifiedImageError as err:
+        logger.exception(IMAGE_ERROR_MESSAGE)
+        raise ValidationException(INVALID_IMAGE_MESSAGE) from err
+    mimetype = img.get_format_mimetype()
+    if mimetype not in SUPPORTED_IMAGES:
+        raise ValidationException(UNSUPPORTED_IMAGE_MESSAGE)
+    if getattr(img, "is_animated", False):
+        raise ValidationException("Animated images are not supported")
+    return mimetype
+
+
+def event_scanning(data: dict):
     """
     Scans the event data for inappropriate content before creating the event.
     Can be skipped by setting the 'unsafeAdmin' field to True.
+    Raises ValidationException if inappropriate content is found.
     """
     scan_results = {
         "name": None,
@@ -601,8 +634,7 @@ def event_scanning(data: dict) -> tuple[str, int]:
         thread.join()
     for key, value in scan_results.items():
         if not value:
-            return f"{key} contains inappropriate content", 400
-    return "", 0
+            raise ValidationException(f"{key} contains inappropriate content")
 
 
 def event_scanning_target(
@@ -614,29 +646,48 @@ def event_scanning_target(
 
 @app.route("/admin/reports", methods=["GET"])
 @app.route("/admin/reports/<report_id>", methods=["GET"])
+@admin_login_required
 def admin_reports(report_id=None):
     """Returns the reports in the database. Can specify report by ID."""
     if report_id is None:
         reports = [report.to_dict() for report in Reports.query.all()]
         return render_template("admin_pages/reports.html", reports=reports)
 
-    if "admin_token" not in session:
-        return "Unauthorised", 401
-
     report = db.get_or_404(Reports, report_id)
     return jsonify(report.to_dict())
 
 
 @app.route("/admin/report/<report_id>/delete", methods=["DELETE"])
+@admin_login_required
 def admin_delete_report(report_id):
     """Deletes report from server."""
-    if "admin_token" not in session:
-        return "Unauthorised", 401
-
     report = db.get_or_404(Reports, report_id)
     db.session.delete(report)
     db.session.commit()
     return Response(status=200, response="Report deleted successfully")
+
+
+@app.route("/admin/tokens", methods=["GET"])
+@app.route("/admin/tokens/<token_id>", methods=["GET"])
+@admin_login_required
+def admin_user_tokens(token_id=None):
+    """Returns active user tokens in the database. Can specify token by ID."""
+    if token_id is None:
+        tokens = [token.to_dict() for token in UserTokens.query.all()]
+        return render_template("admin_pages/user_tokens.html", user_tokens=tokens)
+
+    token = db.get_or_404(UserTokens, token_id)
+    return jsonify(token.to_dict())
+
+
+@app.route("/admin/tokens/<token_id>/delete", methods=["DELETE"])
+@admin_login_required
+def admin_revoke_token(token_id):
+    """Revokes token so user needs to log in again."""
+    token = db.get_or_404(UserTokens, token_id)
+    db.session.delete(token)
+    db.session.commit()
+    return Response(status=200, response="Token successfully revoked")
 
 
 # ================== API Routes ==================
@@ -648,17 +699,9 @@ def user_login():
         return render_template("login.html")
 
     # Handle login requets
-    login_schema = {
-        "properties": {
-            "id": {"type": "string"},
-            "password": {"type": "string"},
-        },
-        "required": ["id", "password"],
-    }
-
     data = request.json
     try:
-        validate(data, login_schema)
+        validate(data, API_LOGIN_SCHEMA)
     except ValidationError:
         logger.exception("Login validation error")
         # Not returning the actual error message for security reasons
@@ -761,38 +804,12 @@ def create_event_api():
     """Creates an event in the database. Must be authenticated user."""
 
     # Validate request body
-    event_schema = {
-        "properties": {
-            "name": {"type": "string"},
-            "description": {"type": "string"},
-            "dateStart": {"type": "string"},
-            "dateEnd": {"type": "string"},
-            "location": {
-                "type": "object",
-                "properties": {
-                    "room": {"type": "string"},
-                    "address": {"type": "string"},
-                },
-            },
-            "bannerImage": {"type": "string"},
-            "creator": {"type": "string"},
-        },
-        "required": [
-            "name",
-            "description",
-            "dateStart",
-            "dateEnd",
-            "location",
-            "bannerImage",
-            "creator",
-        ],
-    }
     data = request.json
     try:
-        validate(data, event_schema)
+        validate(data, API_EVENT_SCHEMA)
     except ValidationError as e:
         return {"error": e.message}, 400
-    
+
     token = request.headers.get("Authorisation")
     token_entry = get_token_entry(token)
     user = get_user_entry(token_entry)
@@ -802,28 +819,12 @@ def create_event_api():
         return {"error": "Unauthorised"}, 401
 
     # Validate event data
-    (msg, status) = event_validation(data)
-    if msg and status:
-        return {"error": msg}, status
-
-    # Validate picture data
-    if data["bannerImage"].startswith(IMAGE_TAG):
-        data["bannerImage"] = data["bannerImage"].split(",")[1]
     try:
-        img: Image = load_image(data["bannerImage"])
-    except Image.UnidentifiedImageError:
-        logger.exception(IMAGE_ERROR_MESSAGE)
-        return {"error": INVALID_IMAGE_MESSAGE}, 400
-    mimetype = img.get_format_mimetype()
-    if mimetype not in SUPPORTED_IMAGES:
-        return {"error": UNSUPPORTED_IMAGE_MESSAGE}, 400
-    if getattr(img, "is_animated", False):
-        return {"error": "Animated images are not supported"}, 400
-
-    # External scanning of the image and text
-    msg, status = event_scanning(data)
-    if msg and status:
-        return {"error": msg}, status
+        event_validation(data)
+        mimetype = photo_validation(data, "bannerImage")
+        event_scanning(data)
+    except ValidationException as err:
+        return {"error": str(err)}, 400
 
     # Construct picture data
     data["bannerImage"] = f"data:{mimetype};base64,{data['bannerImage']}"
@@ -850,36 +851,9 @@ def edit_event_api(event_id=None):
     """Edits event on server."""
 
     # Validate request body
-    event_schema = {
-        "properties": {
-            "name": {"type": "string"},
-            "description": {"type": "string"},
-            "dateStart": {"type": "string"},
-            "dateEnd": {"type": "string"},
-            "location": {
-                "type": "object",
-                "properties": {
-                    "room": {"type": "string"},
-                    "address": {"type": "string"},
-                },
-            },
-            "bannerImage": {"type": "string"},
-            "creator": {"type": "string"},
-        },
-        "required": [
-            "name",
-            "description",
-            "dateStart",
-            "dateEnd",
-            "location",
-            "bannerImage",
-            "creator",
-        ],
-    }
-
     data = request.json
     try:
-        validate(data, event_schema)
+        validate(data, API_EVENT_SCHEMA)
     except ValidationError as e:
         return {"error": e.message}, 400
 
@@ -889,35 +863,19 @@ def edit_event_api(event_id=None):
 
     # Check if event exists
     if not (event := Event.query.filter_by(id=event_id).first()):
-        return {"error": "Event does not exist"}, 404
+        return {"error": NO_EVENT_FOUND_MESSAGE}, 404
 
     # Check if creator is holder of the token
     if token_entry.user_id != event.creator or data["creator"] != user.id:
         return {"error": "Unauthorised"}, 401
 
     # Validate event data
-    (msg, status) = event_validation(data)
-    if msg and status:
-        return {"error": msg}, status
-
-    # Validate picture data
-    if data["bannerImage"].startswith(IMAGE_TAG):
-        data["bannerImage"] = data["bannerImage"].split(",")[1]
     try:
-        img: Image = load_image(data["bannerImage"])
-    except Image.UnidentifiedImageError:
-        logger.exception(IMAGE_ERROR_MESSAGE)
-        return {"error": INVALID_IMAGE_MESSAGE}, 400
-    mimetype = img.get_format_mimetype()
-    if mimetype not in SUPPORTED_IMAGES:
-        return {"error": UNSUPPORTED_IMAGE_MESSAGE}, 400
-    if getattr(img, "is_animated", False):
-        return {"error": "Animated images are not supported"}, 400
-
-    # External scanning of the image and text
-    msg, status = event_scanning(data)
-    if msg and status:
-        return {"error": msg}, status
+        event_validation(data)
+        mimetype = photo_validation(data, "bannerImage")
+        event_scanning(data)
+    except ValidationException as err:
+        return {"error": str(err)}, 400
 
     # Construct picture data
     data["bannerImage"] = f"data:{mimetype};base64,{data['bannerImage']}"
@@ -948,7 +906,7 @@ def delete_event_api(event_id=None):
 
     # Check if event exists
     if not (event := Event.query.filter_by(id=event_id).first()):
-        return {"error": "Event does not exist"}, 404
+        return {"error": NO_EVENT_FOUND_MESSAGE}, 404
 
     # Check if token holder is the creator of the event
     if token_entry.user_id != event.creator or user.id != event.creator:
@@ -958,6 +916,7 @@ def delete_event_api(event_id=None):
     db.session.delete(event)
     db.session.commit()
     return {"event_id": event.id}, 200
+
 
 @app.route("/api/events/<event_id>/join", methods=["POST"])
 @api_login_required
@@ -974,7 +933,7 @@ def join_event_api(event_id):
 
     # Check if event exists
     if not (event := Event.query.filter_by(id=event_id).first()):
-        return {"error": "Event does not exist"}, 404
+        return {"error": NO_EVENT_FOUND_MESSAGE}, 404
 
     # Check if user is already attending the event
     if user.id in event.attendees:
@@ -987,6 +946,7 @@ def join_event_api(event_id):
     db.session.commit()
     return {"event_id": event.id}, 200
 
+
 @app.route("/api/events/<event_id>/leave", methods=["POST"])
 @api_login_required
 def leave_event_api(event_id):
@@ -995,14 +955,14 @@ def leave_event_api(event_id):
     token_entry = get_token_entry(token)
     if not token_entry:
         return {"error": "Unauthorised"}, 401
-    
+
     user = User.query.filter_by(id=token_entry.user_id).first()
     if not user:
         return {"error": "Unauthorised"}, 401
 
     # Check if event exists
     if not (event := Event.query.filter_by(id=event_id).first()):
-        return {"error": "Event does not exist"}, 404
+        return {"error": NO_EVENT_FOUND_MESSAGE}, 404
 
     # Check if user is hosting the event
     if user.id == event.creator:
@@ -1031,7 +991,7 @@ def report_event_api(event_id=None):
 
     # Check if event exists
     if not (event := Event.query.filter_by(id=event_id).first()):
-        return {"error": "Event does not exist"}, 404
+        return {"error": NO_EVENT_FOUND_MESSAGE}, 404
 
     # Check if token holder is the creator of the event
     if token_entry.user_id == event.creator:

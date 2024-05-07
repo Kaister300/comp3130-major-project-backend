@@ -1,12 +1,5 @@
 <div class="users-container">
     <div class="b-example-divider"></div>
-
-    {% if not admin_logged_in %}
-    <div class="login-banner">
-        <h1 class="h3 mb-3 fw-normal">Please login to continue</h1>
-    </div>
-
-    {% else %}
     <div class="d-flex flex-column align-items-stretch flex-shrink-0 bg-white" style="width: 380px;">
         <h1>Users List</h1>
         <div class="list-group list-group-flush border-bottom scrollarea">
@@ -22,24 +15,22 @@
                         <p class="card-text">{{ user.description }}</p>
                         <p class="card-text">{{ user.created }}</p>
                     </div>
+                    <div class="card-footer">
+                        <div class="btn-group" role="group" aria-label="{{ user.id }} User Options">
+                            <a href="/admin/users/{{ user.id }}/delete" class="btn btn-primary delete-user">Delete User</a>
+                        </div>
+                    </div>
                 </div>
             </div>
             {% endfor %}
         </div>
     </div>
-    {% endif %}
 </div>
 
 <style>
     .users-container {
         display: flex;
         flex: auto;
-    }
-
-    .login-banner {
-        flex: auto;
-        align-self: center;
-        text-align: center;
     }
 
     .card-header {
@@ -60,3 +51,18 @@
         padding: 1rem;
     }
 </style>
+
+<script>
+    $(document).ready(function() {
+        $('.delete-user').click(function(e) {
+            e.preventDefault();
+            $.ajax({
+                url: $(this).attr('href'),
+                type: 'DELETE',
+                success: function() {
+                    $('#page-content').load('/admin/users')
+                }
+            })
+        })
+    });
+</script>

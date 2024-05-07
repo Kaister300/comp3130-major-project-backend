@@ -1,12 +1,5 @@
 <div class="events-container">
     <div class="b-example-divider"></div>
-
-    {% if not admin_logged_in %}
-    <div class="login-banner">
-        <h1 class="h3 mb-3 fw-normal">Please login to continue</h1>
-    </div>
-
-    {% else %}
     <div class="d-flex flex-column align-items-stretch flex-shrink-0 bg-white" style="width: 380px;">
         <h1>Events List</h1>
         <div class="list-group list-group-flush bottom-border scrollarea">
@@ -43,19 +36,12 @@
     </div>
     <div class="b-example-divider"></div>
     <div id="page-content-events"></div>
-    {% endif %}
 </div>
 
 <style>
     .events-container {
         display: flex;
         flex: auto;
-    }
-
-    .login-banner {
-        flex: auto;
-        align-self: center;
-        text-align: center;
     }
 
     .card-header {

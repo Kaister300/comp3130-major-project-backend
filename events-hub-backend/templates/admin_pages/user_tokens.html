@@ -1,0 +1,50 @@
+<div class="tokens-container">
+    <div class="b-example-divider"></div>
+    <div class="d-flex flex-column align-items-stretch flex-shrink-0 bg-white" style="width: 380px;">
+        <h1>Tokens List</h1>
+        <div class="list-group list-group-flush bottom-border scrollarea">
+            {% for token in user_tokens %}
+            <div class="list-group-item list-group-item-action">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-text">{{ token.user_id }}</h3>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">Created at: {{ token.created }}</p>
+                    </div>
+                    <div class="card-footer">
+                        <p class="card-text">Token Id: {{ token.id }}</p>
+                        <div class="btn-group" role="group" aria-label="{{ token.id }} Report Options">
+                            <a href="/admin/tokens/{{ token.id }}/delete" class="btn btn-danger revoke-token">Revoke Token</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="b-example-divider"></div>
+    <div id="page-content-tokens"></div>
+</div>
+
+<style>
+    .tokens-container {
+        display: flex;
+        flex: auto;
+    }
+</style>
+
+<script>
+    $(document).ready(function() {
+        $('.revoke-token').click(function(e) {
+            e.preventDefault();
+            $.ajax({
+                url: $(this).attr('href'),
+                type: 'DELETE',
+                success: function() {
+                    $('#page-content').load('/admin/tokens');
+                }
+            });
+        });
+    });
+</script>

@@ -1,69 +1,67 @@
-<div class="create-container">
-    <div class="b-example-divider"></div>
-    <div class="form-create-event overflow-auto">
+<div id="extended-event-edit">
+    <div class="form-edit-event overflow-auto">
         <form>
             <h1 class="h3 mb-3 fw-normal">Create Event</h1>
-            <img src="" id="preview-banner" alt="Preview">
+            <img src="{{ event.bannerImage }}" id="preview-banner" alt="Preview">
             <div class="form-floating">
-                <select class="form-select" id="user-select" aria-label="User select">
-                    <option value="" selected></option>
-                    {% for user in users %}
-                    <option value="{{ user.id }}">{{ user.firstName }} {{ user.lastName }} ({{ user.id }})</option>
-                    {% endfor %}
+                <select class="form-select" id="user-select" aria-label="User select" disabled>
+                    <option selected="{{ event.creator }}">{{ event.creator }}</option>
                 </select>
-                <label for="user-select">Select User</label>
+                <label for="user-select">Selected User</label>
             </div>
             <div class="form-floating">
-                <input type="input" class="form-control" id="name" placeholder="Event Name" required>
+                <input type="input" class="form-control" id="name" placeholder="Event Name" value="{{ event.name }}" required>
                 <label for="name">Event Name</label>
             </div>
             <div class="form-floating">
-                <textarea class="form-control" id="description" placeholder="Event Description" required></textarea>
+                <textarea class="form-control" id="description" placeholder="Event Description" required>{{ event.description }}</textarea>
                 <label for="description">Event Description</label>
             </div>
             <div class="form-floating">
-                <input type="datetime-local" class="form-control" id="date_start" placeholder="Start Time" required>
+                <input type="datetime-local" class="form-control" id="date_start" placeholder="Start Time" value="{{ event.dateStart }}" required>
                 <label for="date_start">Start Time</label>
             </div>
             <div class="form-floating">
-                <input type="datetime-local" class="form-control" id="date_end" placeholder="End Time" required>
+                <input type="datetime-local" class="form-control" id="date_end" placeholder="End Time" value="{{ event.dateEnd }}" required>
                 <label for="date_end">End Time</label>
             </div>
             <div class="form-floating">
-                <input type="input" class="form-control" id="room" placeholder="Room" required>
+                <input type="input" class="form-control" id="room" placeholder="Room" value="{{ event.location.room }}" required>
                 <label for="room">Room</label>
             </div>
             <div class="form-floating">
-                <input type="input" class="form-control" id="address" placeholder="Address" required>
+                <input type="input" class="form-control" id="address" placeholder="Address" value="{{ event.location.address }}" required>
                 <label for="address">Address</label>
             </div>
             <div class="input-group mb-3">
-                <input type="file" class="form-control" id="banner_photo" accept="image/png, image/jpeg" placeholder="Banner Photo" required>
-                <label class="input-group-text" for="banner_photo">Banner Photo</label>
+                <input type="file" class="form-control" id="edit_banner_photo" accept="image/png, image/jpeg" placeholder="Banner Photo" required>
+                <label class="input-group-text" for="edit_banner_photo">Banner Photo</label>
             </div>
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" value="" id="unsafe_admin">
                 <label class="form-check-label" for="unsafe_admin">Skip scanning?</label>
             </div>
-            <button class="w-100 btn btn-lg btn-primary" type="submit">Create Event</button>
+            <button class="w-100 btn btn-lg btn-primary" type="submit">Edit Event</button>
         </form>
         <div id="alerts-placeholder"></div>
     </div>
+    <div class="b-example-divider"></div>
+    <div id="page-content-events-view"></div>
 </div>
 
 <style>
-    .create-container {
+    #extended-event-edit {
         display: flex;
-        flex: auto;
     }
 
-    .form-create-event {
+    .form-edit-event {
         width: 100%;
         max-width: 800px;
         padding: 15px;
         margin: 0 auto;
+        flex: auto;
     }
-
+    
     #preview-banner {
         max-width: 800px;
         max-height: 200px;
@@ -90,12 +88,12 @@
             }
             console.log(data);
             $.ajax({
-                url: '/admin/create_event',
+                url: '/admin/event/{{ event.id }}/edit',
                 type: 'POST',
                 data: JSON.stringify(data),
                 contentType: 'application/json',
                 success: function(response) {
-                    $('#alerts-placeholder').html(`<div class="alert alert-success" role="alert">Event created successfully</div>`);
+                    $('#alerts-placeholder').html(`<div class="alert alert-success" role="alert">Event edited successfully</div>`);
                 },
                 error: function(response) {
                     console.log(response);
@@ -104,7 +102,7 @@
             });
         });
 
-        $('#banner_photo').change(function(e) {
+        $('#edit_banner_photo').change(function(e) {
             let file = e.target.files[0];
             let filesize = ((file.size/1024)/1024).toFixed(10);
             if (filesize < 10) {
