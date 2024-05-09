@@ -19,6 +19,7 @@ COPY $APP_NAME/templates/ /app/templates/
 COPY $APP_NAME/static/ /app/static/
 COPY $APP_NAME/models.py /app/models.py
 COPY $APP_NAME/app.py /app/app.py
+COPY $APP_NAME/json_validation_schemas.py /app/json_validation_schemas.py
 
 # Expose Port
 EXPOSE 3000
