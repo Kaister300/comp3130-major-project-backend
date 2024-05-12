@@ -207,7 +207,6 @@ def api_login_required(f):
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        logger.info("Hit API login required decorator")
         # Check token from header
         if not (auth_token := request.headers.get("Authorisation")):
             return {"error": "Unauthorised"}, 401
@@ -222,7 +221,7 @@ def api_login_required(f):
             db.session.delete(token_entry)
             db.session.commit()
             return {"error": "Unauthorised"}, 401
-        logger.info("Passed API login required decorator")
+        logger.info(f"{user.id} Authenticated")
         return f(*args, **kwargs)
 
     return decorated_function
@@ -845,7 +844,7 @@ def create_event_api():
     return {"event_id": event.id}, 200
 
 
-@app.route("/api/events/<event_id>/edit", methods=["DELETE"])
+@app.route("/api/events/<event_id>/edit", methods=["POST"])
 @api_login_required
 def edit_event_api(event_id=None):
     """Edits event on server."""
@@ -893,7 +892,7 @@ def edit_event_api(event_id=None):
 
 @app.route("/api/events/<event_id>/delete", methods=["DELETE"])
 @api_login_required
-def delete_event_api(event_id=None):
+def delete_event_api(event_id):
     """Deletes event on server."""
 
     token = request.headers.get("Authorisation")
@@ -911,6 +910,17 @@ def delete_event_api(event_id=None):
     # Check if token holder is the creator of the event
     if token_entry.user_id != event.creator or user.id != event.creator:
         return {"error": "Unauthorised"}, 401
+
+    # Remove event from attendees
+    for attendee in event.attendees:
+        user = User.query.filter_by(id=attendee).first()
+        if user:
+            try:
+                temp_list: list = user.joinedEvents.copy()
+                temp_list.remove(event.id)
+                user.joinedEvents = temp_list
+            except ValueError:
+                pass
 
     # Delete event
     db.session.delete(event)
